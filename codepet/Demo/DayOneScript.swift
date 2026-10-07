@@ -359,21 +359,21 @@ enum DayOneScript {
         ("Marketing · Nova", 3.0, .petSays(deptKey: "mkt", line: .reports),
          "The conversations and the scan agree, and Nova names the gap they both leave."),
 
-        ("Sales · Nova", 2.2, .petSays(deptKey: "sales", line: .asks),
+        ("Sales · Vega", 2.2, .petSays(deptKey: "sales", line: .asks),
          "Mona asks again — same founder, a different department waiting to answer."),
 
-        ("Sales · Nova", 2.2, .petSays(deptKey: "sales", line: .frames),
-         "The same pet, a different job: finding who this is NOT for, specifically enough to sting."),
+        ("Sales · Vega", 2.2, .petSays(deptKey: "sales", line: .frames),
+         "A different pet for a different job: finding who this is NOT for, specifically enough to sting."),
 
-        // Link 3 — Sales · Nova.
-        ("Sales · Nova", 2.6, .runTask("mur-notfor"),
+        // Link 3 — Sales · Vega.
+        ("Sales · Vega", 2.6, .runTask("mur-notfor"),
          "The scan turns up crowded ground. The one person who found it insulting is worth "
          + "more than the nine who liked it."),
-        ("Sales · Nova", 2.8, .approveNewestDraft,
+        ("Sales · Vega", 2.8, .approveNewestDraft,
          "A disqualifier list is a strange thing to be pleased about, and it is the first "
          + "artifact that makes the next four decisions easy."),
 
-        ("Sales · Nova", 3.2, .petSays(deptKey: "sales", line: .reports),
+        ("Sales · Vega", 3.2, .petSays(deptKey: "sales", line: .reports),
          "One dissenting voice turns out to be the most useful line in the file. Luna is handed the feel."),
 
         ("Design · Luna", 2.2, .petSays(deptKey: "design", line: .asks),

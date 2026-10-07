@@ -11,7 +11,7 @@ import Foundation
 ///
 /// Each body is written in its pet's register rather than one house voice: `crash` (Finance) is
 /// blunt, `sage` (Support) is patient, `glitch` (Ops) is precise about edges, `null` (Legal) watches the gaps, `luna`
-/// (Design) talks about how it feels, `nova` (Marketing/Sales) leads with the promise, `byte`
+/// (Design) talks about how it feels, `nova` (Marketing) leads with the promise, `vega` (Sales) asks for the commitment, `byte`
 /// (Engineering) is concrete about mechanics. A demo where all eight sound identical would show
 /// eight cards and one pet.
 ///
@@ -271,7 +271,7 @@ extension DemoProject {
                 spreadsheet do not need infrastructure.
                 """),
 
-            // ── nova · Sales ────────────────────────────────────────────────────────────────
+            // ── vega · Sales ────────────────────────────────────────────────────────────────
             DemoDeliverable(
                 keywords: ["first 20", "outreach", "users"],
                 kind: "dms",

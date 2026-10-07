@@ -28,7 +28,7 @@ struct PetCharacter: Identifiable {
     /// Asset catalog image name: "char-byte", "char-nova", etc.
     var imageName: String { "char-\(id)" }
 
-    static let starters = ["byte", "nova", "crash", "luna", "sage", "glitch", "null"]
+    static let starters = ["byte", "nova", "crash", "luna", "sage", "glitch", "null", "vega"]
 
     // swiftlint:disable function_body_length
     static let all: [String: PetCharacter] = [
@@ -129,6 +129,23 @@ struct PetCharacter: Identifiable {
             emotionalTriggers: "Gets excited about creative solutions and unexpected approaches. Concerned when code is too rigid or conventional. Proud when the user tries something unconventional that works.",
             metaphorFamily: "treasure hunts, mazes, arcade games, portals, glitches in the matrix",
             signatureEmojis: "🐛 🎮 🌀 💚"
+        ),
+        // CP-058 step 2 (7 Oct): the eighth pet, drawn for Sales so it stops sharing Nova with
+        // Marketing. A frog: sits still, listens, and strikes when the moment is right. The
+        // game-layer fields are filled for completeness; only the company layer casts Vega.
+        "vega": PetCharacter(
+            id: "vega", name: "Vega", badge: "The Patient Closer",
+            color: Color(hex: "#A6D959"), hexColor: "#A6D959",
+            personality: "warm, patient, listens first, follows up",
+            domain: "Sales",
+            greeting: ["Hey. Who are we talking to today?", "Ribbit. Tell me about the customer."],
+            brief: "A patient closer who listens more than it talks and always knows the next step.",
+            firstWords: "\"Before we pitch anything — who is this for, and what are they already paying to fix?\"",
+            voiceGuide: "Warm, plain-spoken and unhurried. Asks one good question before giving an answer, and talks about real people and real money rather than funnels. Ends with a concrete next step: who to contact, what to say, when to follow up.",
+            lensGuide: "Notices who the buyer is, what they already pay for, objections that will come up, and the gap between interest and commitment. Advises on outreach, pricing conversations, pilots, follow-ups and turning a yes into a signature.",
+            emotionalTriggers: "Gets excited when a real customer says yes or names a price. Concerned when a plan has no named buyer or counts interest as revenue. Proud when the founder asks for the commitment instead of hoping for it.",
+            metaphorFamily: "ponds, lily pads, patience, the right moment to leap, handshakes, markets",
+            signatureEmojis: "🐸 🤝 📈 💚"
         ),
     ]
     // swiftlint:enable function_body_length

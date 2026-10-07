@@ -95,7 +95,8 @@ final class MockDeptReplyTests: XCTestCase {
         XCTAssertEqual(seen.count, 8, "expected 8 distinct department replies, got \(seen.count)")
     }
 
-    /// Marketing and Sales are both cast to nova (Operations and Legal shared glitch until CP-058). The
+    /// Marketing and Sales were both cast to nova until vega took Sales (7 Oct), and Operations
+    /// and Legal shared glitch until null took Legal; the pairs are kept as regressions. The
     /// reply is keyed off the DEPARTMENT, not off the pet, so each pair must still differ —
     /// this is the assertion that would catch a `switch` written over `companionId`.
     ///
@@ -110,7 +111,7 @@ final class MockDeptReplyTests: XCTestCase {
     func testDepartmentsSharingOnePetStillAnswerDifferently() async throws {
         let mkt = try await text(neutral, dept: "mkt")
         let sales = try await text(neutral, dept: "sales")
-        XCTAssertNotEqual(mkt, sales, "nova answers Marketing and Sales identically")
+        XCTAssertNotEqual(mkt, sales, "Marketing and Sales answer identically")
 
         let ops = try await text(neutral, dept: "ops")
         let legal = try await text(neutral, dept: "legal")

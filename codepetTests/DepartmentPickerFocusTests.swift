@@ -6,6 +6,17 @@ final class DepartmentPickerFocusTests: XCTestCase {
 
     private var rows: [PetRow] { DepartmentPickerRows.rows }
 
+    /// A row with TWO chips. No real pet carries two departments since CP-058 (vega took Sales
+    /// from nova on 7 Oct), but the picker still supports it and sideways focus must stay
+    /// covered, so these cases run on a hand-built list: byte, then a two-department nova,
+    /// then luna.
+    private var twoChipRows: [PetRow] {
+        let d = { (k: String) in DepartmentCatalog.find(k)! }
+        return [PetRow(petId: "byte", petName: "Byte", departments: [d("eng")]),
+                PetRow(petId: "nova", petName: "Nova", departments: [d("mkt"), d("sales")]),
+                PetRow(petId: "luna", petName: "Luna", departments: [d("design")])]
+    }
+
     /// Down from the Anyone row enters the list at the first pet's first chip.
     func testDownFromAnyoneEntersTheFirstRow() {
         XCTAssertEqual(DepartmentPickerFocus.down(from: .anyone, rows: rows),
@@ -21,8 +32,8 @@ final class DepartmentPickerFocusTests: XCTestCase {
     /// Crossing rows resets to the first chip: arriving at Nova should land on Marketing,
     /// not on whichever column the previous row happened to leave behind.
     func testMovingBetweenRowsResetsToTheFirstChip() {
-        let nova = rows.firstIndex { $0.petId == "nova" }!
-        XCTAssertEqual(DepartmentPickerFocus.down(from: .chip(pet: nova, dept: 1), rows: rows),
+        let nova = twoChipRows.firstIndex { $0.petId == "nova" }!
+        XCTAssertEqual(DepartmentPickerFocus.down(from: .chip(pet: nova, dept: 1), rows: twoChipRows),
                        .chip(pet: nova + 1, dept: 0))
     }
 
@@ -30,13 +41,13 @@ final class DepartmentPickerFocusTests: XCTestCase {
     /// Wrapping would make Sales one keypress from Marketing in both directions, which
     /// reads as the focus jumping rather than moving.
     func testRightAndLeftWalkNovasTwoChipsAndClamp() {
-        let nova = rows.firstIndex { $0.petId == "nova" }!
+        let nova = twoChipRows.firstIndex { $0.petId == "nova" }!
         let first = PickerFocus.chip(pet: nova, dept: 0)
         let second = PickerFocus.chip(pet: nova, dept: 1)
-        XCTAssertEqual(DepartmentPickerFocus.right(from: first, rows: rows), second)
-        XCTAssertEqual(DepartmentPickerFocus.right(from: second, rows: rows), second)
-        XCTAssertEqual(DepartmentPickerFocus.left(from: second, rows: rows), first)
-        XCTAssertEqual(DepartmentPickerFocus.left(from: first, rows: rows), first)
+        XCTAssertEqual(DepartmentPickerFocus.right(from: first, rows: twoChipRows), second)
+        XCTAssertEqual(DepartmentPickerFocus.right(from: second, rows: twoChipRows), second)
+        XCTAssertEqual(DepartmentPickerFocus.left(from: second, rows: twoChipRows), first)
+        XCTAssertEqual(DepartmentPickerFocus.left(from: first, rows: twoChipRows), first)
     }
 
     /// A one-chip row has nowhere to go sideways.
@@ -62,11 +73,11 @@ final class DepartmentPickerFocusTests: XCTestCase {
 
     /// Return needs to know what is under the cursor.
     func testDepartmentAtResolvesTheFocusedChip() throws {
-        let nova = rows.firstIndex { $0.petId == "nova" }!
+        let nova = twoChipRows.firstIndex { $0.petId == "nova" }!
         let dep = try XCTUnwrap(
-            DepartmentPickerFocus.department(at: .chip(pet: nova, dept: 1), rows: rows))
+            DepartmentPickerFocus.department(at: .chip(pet: nova, dept: 1), rows: twoChipRows))
         XCTAssertEqual(dep.key, "sales")
-        XCTAssertNil(DepartmentPickerFocus.department(at: .anyone, rows: rows))
+        XCTAssertNil(DepartmentPickerFocus.department(at: .anyone, rows: twoChipRows))
     }
 
     /// Opening the picker on a single-department pet lands on its one chip.
@@ -79,9 +90,9 @@ final class DepartmentPickerFocusTests: XCTestCase {
 
     /// Opening on the SECOND chip of a two-department pet lands on that slot, not the first.
     func testLocateFindsTheSecondChipOfATwoDepartmentPet() throws {
-        let nova = rows.firstIndex { $0.petId == "nova" }!
-        let sales = try XCTUnwrap(rows[nova].departments.first { $0.key == "sales" })
-        XCTAssertEqual(DepartmentPickerFocus.locate(sales, in: rows),
+        let nova = twoChipRows.firstIndex { $0.petId == "nova" }!
+        let sales = try XCTUnwrap(twoChipRows[nova].departments.first { $0.key == "sales" })
+        XCTAssertEqual(DepartmentPickerFocus.locate(sales, in: twoChipRows),
                        .chip(pet: nova, dept: 1))
     }
 

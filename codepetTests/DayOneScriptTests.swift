@@ -16,7 +16,7 @@ final class DayOneScriptTests: XCTestCase {
     /// department speaks exactly three times, in order" has to be scoped to THESE chapters —
     /// otherwise Byte's legitimate encore reads as the same bug the test exists to catch.
     private let chainChapters: Set<String> = [
-        "Marketing · Nova", "Sales · Nova", "Design · Luna", "Engineering · Byte",
+        "Marketing · Nova", "Sales · Vega", "Design · Luna", "Engineering · Byte",
         "Finance · Crash", "Support · Sage", "Legal · Null", "Operations · Glitch",
     ]
 
@@ -314,7 +314,7 @@ final class DayOneScriptTests: XCTestCase {
             // (`mur-brand`, `mur-landscape`) are genuinely filed — any earlier and the demo
             // shows a chain-offer card instead of a page. Environment travels WITH them: it
             // links the folder, without which a code run lands in `.noProject`.
-            "Marketing · Nova", "Sales · Nova", "Design · Luna",
+            "Marketing · Nova", "Sales · Vega", "Design · Luna",
             "Environment · Byte", "Code · Byte", "Redesign · Luna",
             "Engineering · Byte", "Finance · Crash", "Support · Sage", "Legal · Null",
             "Operations · Glitch",

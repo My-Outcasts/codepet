@@ -1117,10 +1117,19 @@ struct VCRunCards: View {
         VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
             if lockedIn {
-                HStack(spacing: 16) {
-                    lockedInReceipt
-                    Spacer(minLength: 8)
-                    callLinks(brief)
+                // One row when the whole receipt fits beside the links; otherwise the links drop
+                // to a second row so the pick is never cut to "Low-friction i…" (seen live 7 Oct
+                // on a 640pt card).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 16) {
+                        lockedInReceipt.fixedSize()
+                        Spacer(minLength: 8)
+                        callLinks(brief)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        lockedInReceipt
+                        HStack(spacing: 16) { callLinks(brief) }
+                    }
                 }
                 .padding(.top, 12)
             } else {
@@ -1154,8 +1163,8 @@ struct VCRunCards: View {
         }
     }
 
-    /// "✓ Locked in · Naive unit-number lookup · saved to memory": one line, the pick truncated
-    /// before the rest gives way.
+    /// "✓ Locked in · Naive unit-number lookup · saved to memory": one line; on its own row the
+    /// pick truncates only when even that row is too narrow.
     private var lockedInReceipt: some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle")

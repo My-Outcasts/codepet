@@ -2877,10 +2877,11 @@ final class CompanyStore: ObservableObject {
     ///
     /// It must SAY something. This is the feature's only call to action, and it used to
     /// persist in silence: no chip, no consumed state, nothing at all when the brief had
-    /// no recommendation or the run no id. So it marks the run's message consumed (the
-    /// card then reads "locked in" instead of offering the button again) and appends the
-    /// same 📌 "Noted" chip `handleRemember` uses for a fact byte recorded on its own —
-    /// one affordance for "this is on the record now", not two.
+    /// no recommendation or the run no id. So it marks the run's message consumed and
+    /// stamps the pick on it; the call card's footer then says it in one line, "Locked in ·
+    /// <pick> · saved to memory", instead of offering the button again. It used to append a
+    /// 📌 "Noted" chip under the card as well, which repeated the footer in 10pt grey with the
+    /// whole option text cut at two lines (7 Oct design pass): one place says it now.
     ///
     /// `messageId` is the run's own message, which is also the idempotency key: a second
     /// tap (or a double-click) does nothing rather than appending a second chip.
@@ -2892,14 +2893,12 @@ final class CompanyStore: ObservableObject {
               let i = chatMessages.firstIndex(where: { $0.id == messageId }),
               !chatMessages[i].actionConsumed else { return }
         chatMessages[i].actionConsumed = true
+        chatMessages[i].lockedInChoice = choice?.label
         let cid = companyId
         company.decisions = Decisions.mergeDecisions(existing: company.decisions,
                                                      extracted: [extracted],
                                                      now: Date().timeIntervalSince1970 * 1000,
                                                      scope: activeProjectId)
-        chatMessages.append(CopilotMessage(
-            role: .companion, text: "",
-            noted: [VirtualCompanyDecision.chipFact(for: extracted, language: language)]))
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 

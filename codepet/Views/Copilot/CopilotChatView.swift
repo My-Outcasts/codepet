@@ -1751,6 +1751,7 @@ struct CopilotBubble: View {
             VStack(alignment: .leading, spacing: 8) {
                 textBubble
                 VCRunCards(state: run, lockedIn: message.actionConsumed,
+                           lockedInChoice: message.lockedInChoice,
                            onLockIn: {
                                Task {
                                    await companyStore.lockInVirtualCompanyDecision(run, messageId: message.id,

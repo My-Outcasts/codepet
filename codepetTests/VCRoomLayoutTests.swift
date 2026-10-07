@@ -142,6 +142,24 @@ final class VCRoomLayoutTests: XCTestCase {
         return try render(room, name)
     }
 
+    /// CP-075: a locked-in call's footer is the receipt, "✓ Locked in · <pick> · saved to memory".
+    /// Live on 7 Oct the pick was cut to "Low-friction i…" because the links shared its row; at a
+    /// chat-column width the links now drop to a second row. Rendered at both widths for review.
+    @MainActor
+    func testTheLockedInReceiptRendersAtBothWidths() throws {
+        for (width, name) in [(620.0, "lockin-receipt-620"), (1000.0, "lockin-receipt-1000")] {
+            let room = VCRunCards(state: landedRoom(), lockedIn: true,
+                                  lockedInChoice: "Low-friction interest page", onLockIn: {},
+                                  onOpenRecord: { _ in })
+                .frame(width: width, alignment: .topLeading)
+                .background(CodepetTheme.pageBackground)
+                .environment(\.colorScheme, .dark)
+                .environment(\.uiLanguage, .en)
+            let (rep, _) = try render(room, name)
+            XCTAssertGreaterThan(rep.pixelsHigh, 100)
+        }
+    }
+
     /// The interior fill a `MessageCard` of this hue actually produces, measured.
     @MainActor
     func cardFill(hue: Color, scheme: ColorScheme) throws -> NSColor {

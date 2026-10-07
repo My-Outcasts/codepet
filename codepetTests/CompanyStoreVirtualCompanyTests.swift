@@ -440,6 +440,21 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
 
     /// The feature's only call to action used to persist in silence. It must confirm in
     /// chat, mark itself consumed, and be idempotent.
+    /// CP-075: locking in one of the room's two options stamps that option's label on the
+    /// room's message, where the call card's footer names it ("Locked in · <label> · saved to
+    /// memory"); the stored decision keeps label + consequence, and nothing is appended.
+    func testLockingInAnOptionStampsItsLabelOnTheCard() async throws {
+        let (s, roomId, run) = try await roomWithABrief("Price the single-player product first.",
+                                                       decisionsSaver: { _, _ in true })
+        let before = s.chatMessages.count
+        let pick = VCFounderOption(label: "Naive unit-number lookup", consequence: "Live in a day.")
+        await s.lockInVirtualCompanyDecision(run, messageId: roomId, choice: pick)
+        XCTAssertEqual(s.chatMessages.first { $0.id == roomId }?.lockedInChoice, "Naive unit-number lookup")
+        XCTAssertEqual(s.company.decisions.map(\.statement), ["Naive unit-number lookup: Live in a day."])
+        XCTAssertEqual(s.chatMessages.count, before)
+        XCTAssertFalse(s.chatMessages.contains { $0.noted != nil }, "no Noted strip for a lock-in")
+    }
+
     func testLockingInRecordsTheDecisionAndSaysSoOnce() async throws {
         final class SaveProbe { var saves = 0 }
         let probe = SaveProbe()
@@ -453,17 +468,17 @@ final class CompanyStoreVirtualCompanyTests: XCTestCase {
         XCTAssertEqual(s.company.decisions.first?.source, "virtual-company/r1")
         XCTAssertEqual(s.chatMessages.first { $0.id == roomId }?.actionConsumed, true,
                        "the card must not offer the button again")
-        XCTAssertEqual(s.chatMessages.count, before + 1)
-        XCTAssertEqual(s.chatMessages.last?.noted?.first?.statement, "Price the single-player product first.")
-        // CP-050: the chip leads with the decision, not the room's question; the question stays
-        // on the stored decision.
-        XCTAssertEqual(s.chatMessages.last?.noted?.first?.topic, "Decision")
+        // The call card's footer is the only receipt now (CP-075): no 📌 "Noted" message is
+        // appended under it. A lock-in of the room's own recommendation names no pick — the
+        // recommendation is already the card's headline.
+        XCTAssertEqual(s.chatMessages.count, before)
+        XCTAssertNil(s.chatMessages.first { $0.id == roomId }?.lockedInChoice)
         XCTAssertEqual(s.company.decisions.first?.topic, "q")
         XCTAssertEqual(probe.saves, 1)
 
-        // A second tap (or a double click) is a no-op, not a second chip.
+        // A second tap (or a double click) is a no-op.
         await s.lockInVirtualCompanyDecision(run, messageId: roomId)
-        XCTAssertEqual(s.chatMessages.count, before + 1)
+        XCTAssertEqual(s.chatMessages.count, before)
         XCTAssertEqual(s.company.decisions.count, 1)
         XCTAssertEqual(probe.saves, 1)
     }

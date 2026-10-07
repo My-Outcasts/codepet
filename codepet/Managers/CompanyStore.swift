@@ -394,6 +394,12 @@ final class CompanyStore: ObservableObject {
     /// cleared again after `sendChat` returns — so a press whose room never started (a busy
     /// composer, an engineering route) can never be picked up by some later, unrelated Plan room.
     private var pendingTeamBuild: PendingTeamBuild?
+    /// A Team build whose room ended with a two-way call (7 Oct): held here, unplanned, until the
+    /// founder locks one option in (`lockInVirtualCompanyDecision`), then planned from her pick.
+    /// It does not hold the planning slot, so an abandoned call never strands the button; a new
+    /// press, an account switch or `reset` drops it.
+    private var teamBuildAwaitingCall: (pending: PendingTeamBuild, brief: VCBrief, runId: String,
+                                        seated: [String])?
     /// Set from the moment a press is accepted until its plan lands or fails (every exit path
     /// clears it — see `endTeamPlanning`). Refuses a second press in that window, when `teamRun`
     /// is still nil and a second press would otherwise convene a second paid room.
@@ -636,6 +642,7 @@ final class CompanyStore: ObservableObject {
             teamRun = nil
             teamRunBag = nil
             pendingTeamBuild = nil
+            teamBuildAwaitingCall = nil
             planningTeamBuildId = nil
             isPlanningTeamBuild = false
             teamPlanningDepartments = []
@@ -2425,6 +2432,8 @@ final class CompanyStore: ObservableObject {
         // check alone would let a second press convene a second paid room.
         guard planningTeamBuildId == nil, !(teamRun?.run?.isActive ?? false) else { return }
         let pending = PendingTeamBuild(ask: text, language: language, cid: cid)
+        // A new press replaces a build still waiting on an earlier room's call.
+        teamBuildAwaitingCall = nil
         planningTeamBuildId = pending.id
         pendingTeamBuild = pending
         // Before the room: the room, the planner and every department read the dossier, and a
@@ -2474,6 +2483,15 @@ final class CompanyStore: ObservableObject {
         let brief: VCBrief?
         switch TeamBuildRoomOutcome.from(phase: state.phase, routingDecision: state.routing?.decision,
                                          brief: state.brief) {
+        case .brief(let b) where FounderChoice.options(b) != nil && state.runId != nil:
+            // A two-way call is hers to make. Planning now would settle it for her (7 Oct: the
+            // plan led with the option she then turned down), so wait for her lock-in.
+            teamBuildAwaitingCall = (pending, b, state.runId ?? "",
+                                     state.routing?.agentMeta.compactMap(\.departmentKey) ?? [])
+            endTeamPlanning(pending.id)
+            chatMessages.append(CopilotMessage(role: .companion, text: TeamBuildCopy.awaitingCall(lang)))
+            flushActiveThread()
+            return
         case .brief(let b): brief = b
         case .requestOnly: brief = nil
         case .clarify:
@@ -2900,6 +2918,20 @@ final class CompanyStore: ObservableObject {
                                                      now: Date().timeIntervalSince1970 * 1000,
                                                      scope: activeProjectId)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
+        planAwaitedTeamBuild(runId: runId, choice: choice)
+    }
+
+    /// The founder just locked in the call a Team build was waiting on: plan from her pick.
+    private func planAwaitedTeamBuild(runId: String, choice: VCFounderOption?) {
+        guard let choice, let waiting = teamBuildAwaitingCall, waiting.runId == runId,
+              waiting.pending.cid == companyId else { return }
+        teamBuildAwaitingCall = nil
+        guard planningTeamBuildId == nil, !(teamRun?.run?.isActive ?? false) else { return }
+        planningTeamBuildId = waiting.pending.id
+        teamPlanningDepartments = TeamWaiting.departments(seated: waiting.seated)
+        isPlanningTeamBuild = true
+        let brief = FounderChoice.decided(waiting.brief, pick: choice)
+        Task { [weak self] in await self?.planTeamBuild(waiting.pending, brief: brief) }
     }
 
     /// The pet that runs this task, and the department it runs for — used to attribute
@@ -4611,6 +4643,7 @@ final class CompanyStore: ObservableObject {
         teamRun = nil
         teamRunBag = nil
         pendingTeamBuild = nil
+        teamBuildAwaitingCall = nil
         planningTeamBuildId = nil
         isPlanningTeamBuild = false
         teamPlanningDepartments = []

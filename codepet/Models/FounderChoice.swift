@@ -15,6 +15,21 @@ enum FounderChoice {
         return o
     }
 
+    /// The room's call with the founder's pick as THE decision (7 Oct): the recommendation becomes
+    /// the pick, the trade-off names what she turned down, and no open choice is left. What the
+    /// Team build planner and its build step read, so neither settles the choice on its own.
+    static func decided(_ brief: VCBrief, pick: VCFounderOption) -> VCBrief {
+        let others = (brief.founderOptions ?? []).filter { $0.label != pick.label }.map(\.label)
+        let turnedDown = others.isEmpty ? ""
+            : " The founder turned down: " + others.map { "\"\($0)\"" }.joined(separator: ", ") + "."
+        return VCBrief(recommendation: "\(pick.label): \(pick.consequence)",
+                       confidence: brief.confidence, confidenceReason: brief.confidenceReason,
+                       theRealDisagreement: brief.theRealDisagreement,
+                       tradeoffFounderMustOwn: "The founder chose \"\(pick.label)\"." + turnedDown,
+                       killCriteria: brief.killCriteria, nextAction: brief.nextAction,
+                       whatWeDontKnow: brief.whatWeDontKnow, unresolved: false, founderOptions: nil)
+    }
+
     static func lockInTitle(_ pick: VCFounderOption?, lang: AppLanguage) -> String {
         guard let pick else { return lang == .vi ? "Chọn một để chốt" : "Pick one to lock in" }
         return (lang == .vi ? "Chốt: " : "Lock in: ") + pick.label

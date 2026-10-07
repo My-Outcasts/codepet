@@ -96,6 +96,11 @@ struct CopilotMessage: Identifiable, Equatable {
     /// fat-struct/if-chain pattern rather than an enum refactor, per
     /// docs/superpowers/specs/2026-07-31-coding-agent-in-copilot-design.md §2.
     var vcRun: VirtualCompanyRunState?
+    /// The option the founder locked this room's call in with (`VCFounderOption.label`), drawn
+    /// in the call card's footer: "Locked in · <label> · saved to memory". Nil for a lock-in of
+    /// the room's own recommendation, which is already the card's headline. Set beside
+    /// `actionConsumed` by `CompanyStore.lockInVirtualCompanyDecision`.
+    var lockedInChoice: String? = nil
     /// True once a Virtual Company room landed for THIS turn, superseding this reply.
     ///
     /// Both calls go out in parallel so ordinary chat keeps its latency, which means the fast

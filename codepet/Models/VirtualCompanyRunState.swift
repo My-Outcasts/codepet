@@ -149,15 +149,6 @@ enum VirtualCompanyDecision {
                                  statement: statement,
                                  source: "virtual-company/\(runId)")
     }
-
-    /// The "Noted" chip for a locked-in decision (CP-050). The stored decision keeps the room's
-    /// question as its topic, but the chip draws "topic — statement" in two lines, and the
-    /// question alone filled both: "Noted · Do we optimize for early revenue…", with the choice
-    /// cut off. So the chip leads with the choice under a short label instead.
-    static func chipFact(for decision: ExtractedDecision, language: AppLanguage) -> RememberedFact {
-        RememberedFact(topic: language == .vi ? "Quyết định" : "Decision",
-                       statement: decision.statement)
-    }
 }
 
 

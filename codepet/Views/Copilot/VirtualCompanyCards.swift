@@ -108,6 +108,8 @@ struct VCRunCards: View {
     /// not inside the run state, so a `telemetry`/`done` frame arriving after the tap
     /// cannot un-consume it.
     let lockedIn: Bool
+    /// The option it was locked in with (`CopilotMessage.lockedInChoice`), named in the footer.
+    var lockedInChoice: String? = nil
     let onLockIn: () -> Void
     /// Lock in the option the founder picked (CP-031). Nil falls back to `onLockIn`.
     var onLockInChoice: ((VCFounderOption) -> Void)? = nil
@@ -1107,38 +1109,77 @@ struct VCRunCards: View {
 
     /// Links on the left, the one action on the right. "Lock this in" appears only once an option
     /// is picked, so a stray click on the card can never decide for the founder.
+    ///
+    /// Once locked in, the footer leads with what was locked ("Locked in · <pick> · saved to
+    /// memory") and the links move right. That line is the only receipt: the 📌 "Noted" strip
+    /// that used to sit under the card said the same thing again (7 Oct design pass).
     private func callFooter(_ brief: VCBrief, options: [VCFounderOption]?) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(CodepetTheme.hairline).frame(height: 1)
-            HStack(spacing: 16) {
-                if let open = onOpenRecord {
-                    footerLink(RoomRecord.linkTitle(lang)) { open(.stances) }
+            if lockedIn {
+                HStack(spacing: 16) {
+                    lockedInReceipt
+                    Spacer(minLength: 8)
+                    callLinks(brief)
                 }
-                if BriefDocument.hasMore(brief) {
-                    footerLink(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call") {
-                        readingCall = BriefDocument.document(brief, language: lang)
-                    }
-                }
-                Spacer(minLength: 8)
-                if lockedIn {
-                    Text(lang == .vi ? "Đã chốt — quyết định này giờ dẫn đường cho cả app."
-                                     : "Locked in — this decision now grounds the rest of the app.")
-                        .font(CodepetTheme.inter(12, weight: .medium))
-                        .foregroundColor(CodepetTheme.accentTeal)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if state.canLockIn, let options {
-                    if let i = pickedOption, options.indices.contains(i) {
-                        lockButton(FounderChoice.lockInTitle(options[i], lang: lang)) {
-                            (onLockInChoice ?? { _ in onLockIn() })(options[i])
+                .padding(.top, 12)
+            } else {
+                HStack(spacing: 16) {
+                    callLinks(brief)
+                    Spacer(minLength: 8)
+                    if state.canLockIn, let options {
+                        if let i = pickedOption, options.indices.contains(i) {
+                            lockButton(FounderChoice.lockInTitle(options[i], lang: lang)) {
+                                (onLockInChoice ?? { _ in onLockIn() })(options[i])
+                            }
                         }
+                    } else if state.canLockIn {
+                        lockButton(lang == .vi ? "Chốt quyết định này" : "Lock this decision in", action: onLockIn)
                     }
-                } else if state.canLockIn {
-                    lockButton(lang == .vi ? "Chốt quyết định này" : "Lock this decision in", action: onLockIn)
                 }
+                .padding(.top, 12)
             }
-            .padding(.top, 12)
         }
         .padding(.top, 18)
+    }
+
+    @ViewBuilder private func callLinks(_ brief: VCBrief) -> some View {
+        if let open = onOpenRecord {
+            footerLink(RoomRecord.linkTitle(lang)) { open(.stances) }
+        }
+        if BriefDocument.hasMore(brief) {
+            footerLink(lang == .vi ? "Đọc toàn bộ quyết định" : "Read the full call") {
+                readingCall = BriefDocument.document(brief, language: lang)
+            }
+        }
+    }
+
+    /// "✓ Locked in · Naive unit-number lookup · saved to memory": one line, the pick truncated
+    /// before the rest gives way.
+    private var lockedInReceipt: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+            Text(LockInReceiptCopy.lockedIn(lang))
+                .font(CodepetTheme.inter(12, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+                .fixedSize()
+            if let pick = LockInReceiptCopy.pick(lockedInChoice) {
+                Text("·").foregroundColor(CodepetTheme.mutedText)
+                Text(pick)
+                    .font(CodepetTheme.inter(12, weight: .medium))
+                    .foregroundColor(CodepetTheme.primaryText)
+                    .lineLimit(1).truncationMode(.tail)
+                    .layoutPriority(-1)
+            }
+            Text("· " + LockInReceiptCopy.saved(lang))
+                .font(CodepetTheme.inter(12))
+                .foregroundColor(CodepetTheme.mutedText)
+                .fixedSize()
+        }
+        .font(CodepetTheme.inter(12))
+        .accessibilityElement(children: .combine)
     }
 
     private func footerLink(_ title: String, action: @escaping () -> Void) -> some View {
@@ -1342,3 +1383,15 @@ struct RoomRecordPanel: View {
     }
 }
 
+/// The call card's locked-in receipt (7 Oct design pass, CP-075). Pure, so the copy is
+/// testable without a view.
+enum LockInReceiptCopy {
+    static func lockedIn(_ lang: AppLanguage) -> String { lang == .vi ? "Đã chốt" : "Locked in" }
+    static func saved(_ lang: AppLanguage) -> String { lang == .vi ? "đã lưu vào bộ nhớ" : "saved to memory" }
+    /// The pick to name, or nil when there is none worth naming (a lock-in of the room's own
+    /// recommendation, which is already the card's headline).
+    static func pick(_ label: String?) -> String? {
+        guard let t = label?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
+    }
+}

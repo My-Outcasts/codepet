@@ -21,6 +21,11 @@ describe("classifyPair", () => {
     expect(c.reason).toMatch(/opposed/i);
   });
 
+  test("the reason names departments and stances the way the room card prints them", () => {
+    const c = classifyPair("design", pos("proceed"), "finance", pos("do_not_proceed"));
+    expect(c.reason).toBe("Directly opposed: Design is proceed, Finance is do not proceed.");
+  });
+
   test("proceed_with_conditions against do_not_proceed is still a CONFLICT", () => {
     const c = classifyPair(
       "product",
@@ -39,7 +44,7 @@ describe("classifyPair", () => {
       pos("do_not_proceed", "CAC exceeds LTV; scaling loses money faster.")
     );
     expect(c.kind).toBe("BLOCKER");
-    expect(c.reason).toContain("finance");
+    expect(c.reason).toContain("Finance raised a hard blocker");
     expect(c.reason).toContain("CAC exceeds LTV");
   });
 

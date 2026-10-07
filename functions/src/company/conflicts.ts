@@ -16,6 +16,19 @@ function opposed(a: Stance, b: Stance): boolean {
   return isProceed(a) !== isProceed(b);
 }
 
+/** "design" → "Design", "chief_of_staff" → "Chief Of Staff": the room card's own naming rule. */
+export function deptName(id: string): string {
+  return id
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** "proceed_with_conditions" → "proceed with conditions". */
+function stanceWords(stance: string): string {
+  return stance.replace(/_/g, " ");
+}
+
 /**
  * Classifies one pair of positions. Pure and deterministic — spec §2.2 Phase 3
  * requires this phase to make no LLM call, so the comparison runs on the
@@ -32,6 +45,12 @@ export function classifyPair(
   pb: AgentPosition
 ): Conflict {
   const mk = (kind: ConflictKind, reason: string): Conflict => ({ a, b, kind, reason });
+  // The reason is printed on the room card as written, so it names departments the way the card
+  // does ("Design", not the id "design") and stances in words ("proceed with conditions").
+  const A = deptName(a);
+  const B = deptName(b);
+  const sa = stanceWords(pa.stance);
+  const sb = stanceWords(pb.stance);
 
   // A blocker only bites when the other side actually wants to proceed. Two
   // agents refusing for different reasons have nothing to negotiate.
@@ -40,17 +59,17 @@ export function classifyPair(
   if (aBlocks || bBlocks) {
     const blocker = aBlocks ? a : b;
     const blockerText = (aBlocks ? pa.hard_blocker : pb.hard_blocker) ?? "";
-    return mk("BLOCKER", `${blocker} raised a hard blocker: ${blockerText}`);
+    return mk("BLOCKER", `${deptName(blocker)} raised a hard blocker: ${blockerText}`);
   }
 
   if (opposed(pa.stance, pb.stance)) {
-    return mk("CONFLICT", `Directly opposed: ${a} is ${pa.stance}, ${b} is ${pb.stance}.`);
+    return mk("CONFLICT", `Directly opposed: ${A} is ${sa}, ${B} is ${sb}.`);
   }
 
   if (pa.stance !== pb.stance) {
     return mk(
       "TENSION",
-      `Same direction, different priority: ${a} is ${pa.stance}, ${b} is ${pb.stance}.`
+      `Same direction, different priority: ${A} is ${sa}, ${B} is ${sb}.`
     );
   }
 
@@ -74,12 +93,12 @@ export function classifyPair(
   if (pa.stance === "proceed_with_conditions" && pb.stance === "proceed_with_conditions") {
     return mk(
       "TENSION",
-      `${a} and ${b} both proceed only with conditions — this phase compares stances, not the ` +
+      `${A} and ${B} both proceed only with conditions — this phase compares stances, not the ` +
         `conditions themselves, so treat it as unsettled rather than agreed.`
     );
   }
 
-  return mk("ALIGNED", `Both ${a} and ${b} are ${pa.stance} with no hard blocker in play.`);
+  return mk("ALIGNED", `Both ${A} and ${B} are ${sa} with no hard blocker in play.`);
 }
 
 /**

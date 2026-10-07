@@ -318,7 +318,9 @@ struct EnvironmentView: View {
     private var browseAll: some View {
         let planned = ToolkitPlanned.split(Toolkit.catalog, builtSkills: companyStore.builtSkills).planned
         return VStack(alignment: .leading, spacing: 16) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 20)],
+            // `.top`: a grid cell centres vertically by default, so beside a taller Connectors card
+            // the Skills and Agents headings sat ~30 pt lower than CONNECTORS (build 10, 7 Oct).
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 20, alignment: .top)],
                       alignment: .leading, spacing: 20) {
                 ForEach(ToolCategory.allCases.filter { !rows(in: $0).isEmpty }) { cat in categorySection(cat) }
             }

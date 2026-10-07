@@ -39,6 +39,14 @@ final class RoomHandoffLineTests: XCTestCase {
         XCTAssertTrue(line.hasSuffix("Let me bring in Sales."), line)
     }
 
+    /// Team build: the founder asked for the room, so byte does not have a second thought about it.
+    func testARequestedRoomOnlySaysWhoIsComingIn() throws {
+        let r = try routing([("finance", "fin"), ("marketing", "mkt")])
+        XCTAssertEqual(RoomHandoff.line(.en, routing: r, requested: true), "Bringing in Finance and Marketing.")
+        XCTAssertEqual(RoomHandoff.line(.en, routing: nil, requested: true), "Bringing the team in.")
+        XCTAssertFalse(RoomHandoff.line(.vi, routing: r, requested: true).contains("Thật ra"))
+    }
+
     /// No routing to read (should not happen behind `handsOffToRoom`) still says something true.
     func testWithNoSeatsItNamesNoOne() {
         XCTAssertEqual(RoomHandoff.line(.en, routing: nil), "Actually — this one needs the whole room. Let me bring the team in.")

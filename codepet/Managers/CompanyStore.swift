@@ -398,8 +398,9 @@ final class CompanyStore: ObservableObject {
     /// founder locks one option in (`lockInVirtualCompanyDecision`), then planned from her pick.
     /// It does not hold the planning slot, so an abandoned call never strands the button; a new
     /// press, an account switch or `reset` drops it.
+    /// `lineId` is the "Pick one…" line, removed once her pick is in (it said nothing true after).
     private var teamBuildAwaitingCall: (pending: PendingTeamBuild, brief: VCBrief, runId: String,
-                                        seated: [String])?
+                                        seated: [String], lineId: String)?
     /// Set from the moment a press is accepted until its plan lands or fails (every exit path
     /// clears it — see `endTeamPlanning`). Refuses a second press in that window, when `teamRun`
     /// is still nil and a second press would otherwise convene a second paid room.
@@ -2486,10 +2487,11 @@ final class CompanyStore: ObservableObject {
         case .brief(let b) where FounderChoice.options(b) != nil && state.runId != nil:
             // A two-way call is hers to make. Planning now would settle it for her (7 Oct: the
             // plan led with the option she then turned down), so wait for her lock-in.
+            let line = CopilotMessage(role: .companion, text: TeamBuildCopy.awaitingCall(lang))
             teamBuildAwaitingCall = (pending, b, state.runId ?? "",
-                                     state.routing?.agentMeta.compactMap(\.departmentKey) ?? [])
+                                     state.routing?.agentMeta.compactMap(\.departmentKey) ?? [], line.id)
             endTeamPlanning(pending.id)
-            chatMessages.append(CopilotMessage(role: .companion, text: TeamBuildCopy.awaitingCall(lang)))
+            chatMessages.append(line)
             flushActiveThread()
             return
         case .brief(let b): brief = b
@@ -2742,7 +2744,8 @@ final class CompanyStore: ObservableObject {
                     if state.isEscapeHatch { break }
                     guard let self else { return }
                     await self.publishRunProgress(state, roomMessageId: roomMessageId,
-                                                  anchorId: anchorId, cid: cid, language: language)
+                                                  anchorId: anchorId, cid: cid, language: language,
+                                                  requested: teamBuild != nil)
                     // The room's own card is on screen from this frame on and carries the wait.
                     if teamBuild != nil, state.handsOffToRoom { self.isConveningTeamRoom = false }
                 }
@@ -2764,7 +2767,8 @@ final class CompanyStore: ObservableObject {
                 state.terminalError = "stream_lost"
                 state.phase = .failed
                 await self?.publishRunProgress(state, roomMessageId: roomMessageId,
-                                               anchorId: anchorId, cid: cid, language: language)
+                                               anchorId: anchorId, cid: cid, language: language,
+                                               requested: teamBuild != nil)
             }
             // Declined, failed before routing, or cancelled: no card is coming, so the row ends
             // with the run rather than ticking over whatever the chat says next.
@@ -2806,7 +2810,8 @@ final class CompanyStore: ObservableObject {
                                     roomMessageId: String,
                                     anchorId: String,
                                     cid: String?,
-                                    language: AppLanguage) async {
+                                    language: AppLanguage,
+                                    requested: Bool = false) async {
         guard companyId == cid, state.handsOffToRoom else { return }
         // The room belongs to the conversation its question was asked in. `anchorId` is
         // byte's message for that turn, so its absence means the founder has moved on
@@ -2824,7 +2829,7 @@ final class CompanyStore: ObservableObject {
             // beneath an unrelated answer, reading as a reply to that instead. Later
             // frames resolve by id, so the position is decided once, here.
             chatMessages.insert(CopilotMessage(id: roomMessageId, role: .companion,
-                                               text: RoomHandoff.line(language, routing: state.routing), vcRun: state),
+                                               text: RoomHandoff.line(language, routing: state.routing, requested: requested), vcRun: state),
                                 at: anchor + 1)
             // The fast answer above is now the room's first take, not the answer. Marked at the
             // moment the room actually lands — not when the fan-out starts — so a run the router
@@ -2926,6 +2931,9 @@ final class CompanyStore: ObservableObject {
         guard let choice, let waiting = teamBuildAwaitingCall, waiting.runId == runId,
               waiting.pending.cid == companyId else { return }
         teamBuildAwaitingCall = nil
+        // The wait is over: the planning row and then the plan card say what happens next, and a
+        // line still asking her to pick sat above them (build 10, 7 Oct).
+        chatMessages.removeAll { $0.id == waiting.lineId }
         guard planningTeamBuildId == nil, !(teamRun?.run?.isActive ?? false) else { return }
         planningTeamBuildId = waiting.pending.id
         teamPlanningDepartments = TeamWaiting.departments(seated: waiting.seated)

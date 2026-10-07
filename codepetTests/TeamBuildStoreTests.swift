@@ -448,6 +448,19 @@ final class TeamBuildStoreTests: XCTestCase {
         XCTAssertTrue(s.teamBuildAvailable, "waiting on her must not hold the Team build button")
     }
 
+    /// She pressed Team build, so the room's line must not read as byte changing its mind
+    /// ("Actually — this one needs the whole room", build 10, 7 Oct).
+    func testATeamBuildRoomSaysWhoIsComingInNotActually() async throws {
+        let s = F.store(probe: F.Probe(), root: root, options: F.twoOptions)
+        await s.hydrate(companyId: "u")
+        await s.startTeamBuild("pants page", language: .en)
+        let landed = await F.waitFor { s.chatMessages.contains { $0.vcRun != nil } }
+        XCTAssertTrue(landed, "the room never landed")
+        let line = try XCTUnwrap(s.chatMessages.first { $0.vcRun != nil }?.text)
+        XCTAssertTrue(line.hasPrefix("Bringing"), line)
+        XCTAssertFalse(line.contains("Actually"), line)
+    }
+
     /// Her pick IS the plan's starting point: the planner and the run see the chosen option as
     /// the decision, with no open choice left for either to settle on its own.
     func testLockingInAnOptionPlansFromThePick() async throws {
@@ -471,6 +484,8 @@ final class TeamBuildStoreTests: XCTestCase {
                       "what she turned down is named, so the plan does not drift back to it")
         XCTAssertEqual(s.teamRun?.run?.brief?.recommendation, brief.recommendation,
                        "the build step reads the run's brief, so it must carry the pick too")
+        XCTAssertFalse(s.chatMessages.contains { $0.text == TeamBuildCopy.awaitingCall(.en) },
+                       "once she has picked, the line asking her to pick goes")
     }
 
     /// Locking in a room that is not the waiting Team build's (a Plan-mode room) plans nothing.

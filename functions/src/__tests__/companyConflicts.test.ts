@@ -162,6 +162,16 @@ describe("needsNegotiation", () => {
     expect(c.reason).toContain("conditions");
   });
 
+  // Build 12 (8 Oct): this reason is shown to the founder in the meeting's tension box, and it
+  // read "…this phase compares stances, not the conditions themselves…" — pipeline talk.
+  it("explains two conditional yeses in founder words, not pipeline words", () => {
+    const c = classifyPair("product", pos("proceed_with_conditions"),
+                           "finance", pos("proceed_with_conditions"));
+    expect(c.reason).not.toMatch(/phase|stance/i);
+    expect(c.reason).toContain("Product");
+    expect(c.reason).toContain("Finance");
+  });
+
   it("still calls two UNqualified yeses an agreement", () => {
     expect(classifyPair("product", pos("proceed"),
                         "finance", pos("proceed")).kind).toBe("ALIGNED");

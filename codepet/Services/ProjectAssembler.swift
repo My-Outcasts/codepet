@@ -463,7 +463,14 @@ enum TeamSlug {
             .replacingOccurrences(of: "đ", with: "d")
         let kebab = ascii.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let capped = String(kebab.prefix(40)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        var capped = String(kebab.prefix(40))
+        // A cut inside a word reads as a typo in a file name (`…privacy-checklis.md`), so back up
+        // to the last whole word. One unbroken word longer than the cap still gets the hard cut.
+        if kebab.count > 40, kebab[kebab.index(kebab.startIndex, offsetBy: 40)] != "-",
+           let dash = capped.lastIndex(of: "-") {
+            capped = String(capped[..<dash])
+        }
+        capped = capped.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return capped.isEmpty ? "project" : capped
     }
 }

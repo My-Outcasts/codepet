@@ -20,6 +20,13 @@ describe("teamSlug", () => {
     expect(s.length).toBeLessThanOrEqual(40);
     expect(s.endsWith("-")).toBe(false);
   });
+  // Build 12 (8 Oct): doc files came out as `…privacy-checklis.md` — cut mid-word at 40.
+  // Mirrors TeamSlug.make in ProjectAssembler.swift (TeamSlugTests) — keep the two in step.
+  it("ends a capped slug on a whole word", () => {
+    expect(teamSlug("Lockerly launch email and privacy checklist for tenants")).toBe("lockerly-launch-email-and-privacy");
+    expect(teamSlug("abcdefghij abcdefghij abcdefghij abcdefg more words")).toBe("abcdefghij-abcdefghij-abcdefghij-abcdefg");
+    expect(teamSlug("a".repeat(60))).toBe("a".repeat(40));
+  });
 });
 
 describe("coerceWorkPlan", () => {

@@ -21,7 +21,13 @@ const str = (v: unknown, max = 600): string => (typeof v === "string" ? v.trim()
 export function teamSlug(s: string): string {
   const ascii = s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D");
   const kebab = ascii.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const capped = kebab.slice(0, 40).replace(/-+$/g, "");
+  let capped = kebab.slice(0, 40);
+  // A cut inside a word reads as a typo in a file name (`…privacy-checklis.md`), so back up to
+  // the last whole word. One unbroken word longer than the cap still gets the hard cut.
+  if (kebab.length > 40 && kebab[40] !== "-" && capped.includes("-")) {
+    capped = capped.slice(0, capped.lastIndexOf("-"));
+  }
+  capped = capped.replace(/-+$/g, "");
   return capped || "project";
 }
 

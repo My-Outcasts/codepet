@@ -93,8 +93,8 @@ export function classifyPair(
   if (pa.stance === "proceed_with_conditions" && pb.stance === "proceed_with_conditions") {
     return mk(
       "TENSION",
-      `${A} and ${B} both proceed only with conditions — this phase compares stances, not the ` +
-        `conditions themselves, so treat it as unsettled rather than agreed.`
+      `${A} and ${B} both say yes, but each with conditions of their own — ` +
+        `nobody has agreed those conditions yet.`
     );
   }
 

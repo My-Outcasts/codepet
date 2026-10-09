@@ -112,4 +112,22 @@ final class ChatContextDepartmentDeskTests: XCTestCase {
         XCTAssertFalse(out.contains("runway noted at 7 months"))
         XCTAssertFalse(out.contains("has noted"))
     }
+
+    /// Review, 9 Oct: moving a note to the desk took it out from under "honor these" — the one
+    /// fact Finance is not told to stand by would be Finance's own.
+    func testDeskNotesAreStillDecisionsToHonor() {
+        let out = ChatContext.compose(brief: brief, tasks: [], decisions: [note("price", "Pro $19", dept: "fin")],
+                                      focusDepartment: finance)
+        let tail = out.components(separatedBy: "Finance has noted:\n").dropFirst().first ?? ""
+        let afterNotes = tail.components(separatedBy: "\n").drop { $0.hasPrefix("- ") }.first ?? ""
+        XCTAssertTrue(afterNotes.contains("never contradict"), "got: \(afterNotes)")
+    }
+
+    /// Review, 9 Oct: two entries can share an identity (assignDecision). Excluding by identity
+    /// dropped the one that was NOT on the desk from the prompt altogether.
+    func testAnotherEntryWithTheSameTopicIsNotDroppedFromThePrompt() {
+        let ds = [note("pricing", "Finance says $19", dept: "fin"), note("pricing", "Sales says $29", dept: "sales")]
+        let out = ChatContext.compose(brief: brief, tasks: [], decisions: ds, focusDepartment: finance)
+        XCTAssertTrue(out.contains("Sales says $29"))
+    }
 }

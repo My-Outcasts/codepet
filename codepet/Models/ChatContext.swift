@@ -178,6 +178,9 @@ enum ChatContext {
         if !notes.isEmpty {
             lines.append("\(dep.name) has noted:")
             lines.append(contentsOf: notes.map { "- \($0.topic): \($0.statement)" })
+            // These left the decisions block, so they carry its instruction with them — otherwise
+            // the one fact this department is not told to stand by would be its own. Review, 9 Oct.
+            lines.append("These are decisions on record: never contradict or silently re-open them; if the answer genuinely conflicts with one, say so in one short note.")
         }
         let mine = tasks.filter { $0.dept == dep.key }
         let done = mine.filter(\.done).prefix(6).map(\.title)
@@ -320,7 +323,10 @@ enum ChatContext {
                 .sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
                 .prefix(deskNotesCap))
         } ?? []
-        let noted = Set(deskNotes.map(Decisions.identity))
+        // By the entry itself, not its identity: two entries can share an identity (`assignDecision`
+        // can put a second "pricing" into a project), and the one NOT on the desk must still reach
+        // the prompt below. Review, 9 Oct.
+        let noted = Set(deskNotes)
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
         if let dep = focusDepartment {
             parts.append("The founder is focused on the \(dep.name) department right now — "
@@ -330,7 +336,7 @@ enum ChatContext {
         // Excerpted on the desk already, so the ranker below must not spend a slot repeating it.
         let deskIds = focusDepartment == nil ? Set<String>() : Set(departmentWork.prefix(deskWorkCap).map(\.id))
         // On the desk already, so not repeated here.
-        let d = Decisions.composeDecisions(usable.filter { !noted.contains(Decisions.identity($0)) })
+        let d = Decisions.composeDecisions(usable.filter { !noted.contains($0) })
         if !d.isEmpty { parts.append(d) }
         parts.append("Roadmap progress: \(RoadmapEngine.progressPercent(tasks))%.")
         if let next = RoadmapEngine.nextStep(tasks) {

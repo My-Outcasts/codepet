@@ -472,6 +472,30 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertTrue(s.chatMessages.contains { $0.noted?.first?.topic == "pricing" })
     }
 
+    /// The turn's department is the one that noted the fact.
+    func testRememberOnADepartmentTurnIsTaggedWithThatDepartment() async {
+        let fact = RememberedFact(topic: "runway", statement: "8 months")
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["Noted"], remember: [fact]),
+                             decisionsSaver: { _, _ in true })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("our runway is 8 months", language: .en, department: DepartmentCatalog.find("fin"))
+        XCTAssertEqual(s.company.decisions.first { $0.topic == "runway" }?.dept, "fin")
+    }
+
+    /// An ordinary turn is company-wide, even straight after a department turn.
+    func testRememberOnAnOrdinaryTurnIsUntagged() async {
+        let fact = RememberedFact(topic: "goal", statement: "ten paying founders")
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil },
+                             chatStreamer: Self.streamer(deltas: ["Noted"], remember: [fact]),
+                             decisionsSaver: { _, _ in true })
+        await s.hydrate(companyId: "u")
+        await s.sendChat("ten paying founders is the goal", language: .en)
+        XCTAssertNil(s.company.decisions.first { $0.topic == "goal" }?.dept)
+    }
+
     /// `sendChat` populates `env_setup` from the company's currently-OFF toolkit
     /// items (mirrors the web's off-toolkit filter) — AND, since the
     /// environment-honesty pass, only from items that are actually built.

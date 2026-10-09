@@ -18,6 +18,14 @@ struct DecisionEntry: Codable, Hashable {
     /// Lyon/Söhne, "one small collection a season") because decisions had no project at all.
     /// Optional and omitted when nil, so every stored decision decodes and re-encodes unchanged.
     var scope: String? = nil
+    /// The department that recorded it (2026-10-09): a native key (`fin`, `mkt`, …), or nil for
+    /// company-wide. Stamped by chat `remember_fact` (the turn's department) and by approval
+    /// extraction (the deliverable's); a room lock-in stays nil, because a decision several
+    /// departments argued out belongs to the company. It feeds the department's desk.
+    ///
+    /// Deliberately NOT part of `identity`: a topic is one truth for the company, so Sales
+    /// re-recording the price replaces Finance's and takes the tag, rather than leaving two prices.
+    var dept: String? = nil
 }
 
 /// A decision as returned by the extractDecisions CF (no timestamp yet).
@@ -28,7 +36,9 @@ struct ExtractedDecision: Codable, Hashable {
 }
 
 enum Decisions {
-    static let MAX_DECISIONS = 30
+    /// 30 until 2026-10-09, when eight departments started keeping notes in the same store.
+    /// 60 × ~700 characters is ~42 KB of the company document's 1 MiB.
+    static let MAX_DECISIONS = 60
     /// A decision the founder applied to every project.
     static let everywhere = "*"
 
@@ -71,7 +81,7 @@ enum Decisions {
             let topic = t(r.topic), statement = t(r.statement)
             if topic.isEmpty || statement.isEmpty { continue }
             entries.append(DecisionEntry(topic: topic, statement: statement, source: cleanSource(r.source),
-                                         updatedAt: r.updatedAt, scope: r.scope))
+                                         updatedAt: r.updatedAt, scope: r.scope, dept: r.dept))
         }
         if entries.count <= max { return entries }
         return Array(entries.sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }.prefix(max))
@@ -83,7 +93,8 @@ enum Decisions {
     /// `scope` is stamped on every extracted decision, and identity includes it — the same topic
     /// in another project is a different fact and is never superseded from here.
     static func mergeDecisions(existing: [DecisionEntry], extracted: [ExtractedDecision],
-                               now: Double, scope: String? = nil, max: Int = MAX_DECISIONS) -> [DecisionEntry] {
+                               now: Double, scope: String? = nil, dept: String? = nil,
+                               max: Int = MAX_DECISIONS) -> [DecisionEntry] {
         var order: [String] = []
         var byTopic: [String: DecisionEntry] = [:]
         for d in existing {
@@ -97,7 +108,7 @@ enum Decisions {
             let topic = t(e.topic), statement = t(e.statement)
             if topic.isEmpty || statement.isEmpty { continue }
             let fresh = DecisionEntry(topic: topic, statement: statement, source: cleanSource(e.source),
-                                      updatedAt: now, scope: scope)
+                                      updatedAt: now, scope: scope, dept: dept)
             let k = identity(fresh)
             if byTopic[k] == nil { order.append(k) }
             byTopic[k] = fresh

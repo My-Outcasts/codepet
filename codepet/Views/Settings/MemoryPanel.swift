@@ -82,7 +82,11 @@ struct MemoryPanel: View {
                     // a duplicated ForEach id silently drops rows from a trust surface.
                     ForEach(Array(facts.enumerated()), id: \.offset) { idx, fact in
                         if idx > 0 { SettingsDivider() }
-                        SettingsRow(label: fact.statement, description: fact.topic + " · " + scopeLabel(fact)) {
+                        // The department that noted it, when one did — the founder can see whose
+                        // desk a fact sits on before deciding whether to forget it.
+                        SettingsRow(label: fact.statement,
+                                    description: [fact.topic, DepartmentCatalog.find(fact.dept)?.name, scopeLabel(fact)]
+                                        .compactMap { $0 }.joined(separator: " · ")) {
                             // Unassigned while a project is open: left out of that project's
                             // context (`Decisions.applicable`), so offer to assign it here.
                             if fact.scope == nil, let project = projectName {

@@ -2342,7 +2342,7 @@ final class CompanyStore: ObservableObject {
                                                             language: language)
                 }
             }
-            await handleDoneAction(action, cid: cid, language: language)
+            await handleDoneAction(action, cid: cid, language: language, deptKey: deptKey)
             guard companyId == cid else { return }
         case .leadIn(let kind):
             // A `.done` was received but byte sent zero chat text — don't leave the
@@ -2381,7 +2381,7 @@ final class CompanyStore: ObservableObject {
         // so dispatching it too would be a no-op — but an explicit no-op is a trap for whoever
         // next adds a side effect to `handleDoneAction`.
         if tail != .fallback, let doneAction {
-            await handleDoneAction(doneAction, cid: cid, language: language)
+            await handleDoneAction(doneAction, cid: cid, language: language, deptKey: deptKey)
             guard companyId == cid else { return }
         }
         // The run is NOT awaited. It writes into its own appended message, so it has
@@ -2925,6 +2925,7 @@ final class CompanyStore: ObservableObject {
         chatMessages[i].actionConsumed = true
         chatMessages[i].lockedInChoice = choice?.label
         let cid = companyId
+        // No `dept`: several departments argued this out, so it is the company's, not one desk's.
         company.decisions = Decisions.mergeDecisions(existing: company.decisions,
                                                      extracted: [extracted],
                                                      now: Date().timeIntervalSince1970 * 1000,
@@ -3367,14 +3368,17 @@ final class CompanyStore: ObservableObject {
     /// anything; `remember` is orthogonal and always runs alongside. Each step
     /// re-checks `companyId == cid` (via its own handler) so an account switch
     /// mid-await stops the rest from landing in a different account's chat.
-    private func handleDoneAction(_ action: ChatDoneAction, cid: String?, language: AppLanguage) async {
+    /// `deptKey` is the department this turn answered as — the same one sent on the request — so a
+    /// fact `remember_fact` records lands in that department's notebook. nil on an ordinary turn.
+    private func handleDoneAction(_ action: ChatDoneAction, cid: String?, language: AppLanguage,
+                                  deptKey: String? = nil) async {
         await handleRunTaskId(action.runTaskId, cid: cid, language: language)
         guard companyId == cid else { return }
         await handleNav(action.nav, cid: cid)
         guard companyId == cid else { return }
         await handleSetup(action.setup, cid: cid)
         guard companyId == cid else { return }
-        await handleRemember(action.remember, cid: cid)
+        await handleRemember(action.remember, cid: cid, deptKey: deptKey)
         guard companyId == cid else { return }
         handleRoadmapProposal(action, language: language)
         handleMessageDrafts(action, language: language)
@@ -3605,12 +3609,12 @@ final class CompanyStore: ObservableObject {
     /// web) — no approval gate, unlike a draft. Mirrors `rememberFromApproval`'s
     /// merge+persist; appends one transient "Noted" chip per fact so the founder
     /// sees what stuck.
-    private func handleRemember(_ facts: [RememberedFact], cid: String?) async {
+    private func handleRemember(_ facts: [RememberedFact], cid: String?, deptKey: String? = nil) async {
         guard !facts.isEmpty, companyId == cid else { return }
         let extracted = facts.map { ExtractedDecision(topic: $0.topic, statement: $0.statement, source: "chat") }
         let now = Date().timeIntervalSince1970 * 1000
         company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now,
-                                                     scope: activeProjectId)
+                                                     scope: activeProjectId, dept: deptKey)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
         guard companyId == cid else { return }
         // All facts land on the one reply rather than one bare row per fact — three
@@ -4355,8 +4359,9 @@ final class CompanyStore: ObservableObject {
         let extracted = await decisionExtractor(dto, onRecord)
         guard companyId == cid, !extracted.isEmpty else { return }
         let now = Date().timeIntervalSince1970 * 1000
+        // The deliverable's department noted what approving it decided — its desk shows it.
         company.decisions = Decisions.mergeDecisions(existing: company.decisions, extracted: extracted, now: now,
-                                                     scope: activeProjectId)
+                                                     scope: activeProjectId, dept: dept.isEmpty ? nil : dept)
         if let cid { _ = await decisionsSaver(cid, company.decisions) }
     }
 

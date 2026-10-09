@@ -1074,7 +1074,8 @@ final class CompanyStore: ObservableObject {
                   founderAsk: String? = nil, convenesRoom: Bool = false,
                   pinned: [ContextPin] = [],
                   attachments: [ChatAttachment] = [],
-                  aboutTask: RoadmapTask? = nil) async {
+                  aboutTask: RoadmapTask? = nil,
+                  requestedAgents: [String] = []) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // A turn carrying attachments is complete on its own — bail only when BOTH the
         // words and the files are empty. `renderTurn` on the backend already accepts a
@@ -1107,7 +1108,7 @@ final class CompanyStore: ObservableObject {
                           convene: convenesRoom ? words : nil,
                           display: words,
                           founderAsk: words, pinned: pinned, attachments: attachments,
-                          aboutTask: aboutTask)
+                          aboutTask: aboutTask, roomAgents: requestedAgents)
     }
 
     /// Link a local project folder for the coding agent. Optionally seeds CLAUDE.md
@@ -2086,7 +2087,8 @@ final class CompanyStore: ObservableObject {
                              convene: String? = nil, display: String? = nil,
                              founderAsk: String? = nil, pinned: [ContextPin] = [],
                              attachments: [ChatAttachment] = [],
-                             aboutTask: RoadmapTask? = nil) async {
+                             aboutTask: RoadmapTask? = nil,
+                             roomAgents: [String] = []) async {
         guard !isCompanionTyping, !isStreaming else { return }
         // The same total-base64 rule the composer refuses with, applied again at the
         // wire. Not belt-and-braces for its own sake: the composer is only ONE caller,
@@ -2200,7 +2202,7 @@ final class CompanyStore: ObservableObject {
         // carries the founder's own words (pre-`ChatMode` shaping) for a typed one.
         if let convene {
             startVirtualCompanyRun(ask: convene, anchorId: placeholderId,
-                                   cid: cid, language: language)
+                                   cid: cid, language: language, agents: roomAgents)
         }
 
         var streamedText = ""
@@ -2721,12 +2723,14 @@ final class CompanyStore: ObservableObject {
     /// Never awaited by the caller — see `publishRunProgress` for why the room owns its
     /// own appended message, and `vcTasks`/`vcRunDeadlineNanos` for what bounds it.
     private func startVirtualCompanyRun(ask: String, anchorId: String,
-                                        cid: String?, language: AppLanguage) {
+                                        cid: String?, language: AppLanguage, agents: [String] = []) {
         let vcRequest = VirtualCompanyRequest(
             request: ask,
             language: language.rawValue,
             founder: FounderContextMapper.founder(from: company.brief, product: productDossier?.contextBlock),
-            stressTest: false)
+            stressTest: false,
+            // The founder's pick from a department's offer; nil (not encoded) otherwise.
+            agents: agents.isEmpty ? nil : agents)
         // Inherits this method's @MainActor isolation (SWIFT_APPROACHABLE_CONCURRENCY
         // + SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor), so the loop body — and the
         // `chatMessages` writes it makes through `publishRunProgress` — run on the
@@ -3042,6 +3046,21 @@ final class CompanyStore: ObservableObject {
             upstreamPetName: specialist.flatMap { PetCharacter.all[$0.companionId]?.name })
         chatMessages.append(CopilotMessage(role: .companion, text: offer.line(language),
                                            chainOffer: offer))
+    }
+
+    /// "Bring Finance + Sales in" — convenes the room with exactly the departments the offer
+    /// named, on its question. Once: the flag is set before the await, so a second press (or a
+    /// re-render racing the first) finds it used. The room costs what a room costs; that is why
+    /// it is the founder's press and never automatic.
+    func acceptRoomOffer(messageId: String, language: AppLanguage) async {
+        guard let i = chatMessages.firstIndex(where: { $0.id == messageId }),
+              let offer = chatMessages[i].roomOffer,
+              !chatMessages[i].roomOfferUsed,
+              !isStreaming else { return }
+        let agents = offer.departments.compactMap(RoomInvite.roomAgentId(for:))
+        guard agents.count >= 2 else { return }
+        chatMessages[i].roomOfferUsed = true
+        await sendChat(offer.question, language: language, convenesRoom: true, requestedAgents: agents)
     }
 
     /// "Run both" — the dependency, then the task, with the dependency's work fed forward.
@@ -3382,6 +3401,10 @@ final class CompanyStore: ObservableObject {
         guard companyId == cid else { return }
         handleRoadmapProposal(action, language: language)
         handleMessageDrafts(action, language: language)
+        // A department's offer to bring others in rides on this reply, like the Noted chip.
+        if let offer = action.roomOffer, let i = inlineActionTarget() {
+            chatMessages[i].roomOffer = offer
+        }
     }
 
     /// Attach the messages the companion wrote to its own reply.

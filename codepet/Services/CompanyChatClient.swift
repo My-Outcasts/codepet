@@ -349,7 +349,7 @@ struct CompanyChatReply: Equatable {
 }
 
 /// A department's offer to bring others into the room (`suggest_room`, 9 Oct). Native keys
-/// (`fin`, `sales`…) — `RoomOffer.roomAgentId(for:)` maps them for the room request.
+/// (`fin`, `sales`…) — `RoomInvite.roomAgentId(for:)` maps them for the room request.
 struct RoomOfferDTO: Codable, Equatable {
     let departments: [String]
     let question: String

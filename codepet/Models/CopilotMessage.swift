@@ -37,6 +37,11 @@ struct CopilotMessage: Identifiable, Equatable {
     /// `blockedOffer`: the store writes them onto an already-appended message, and adding
     /// them to `init` would churn every existing call site for nothing.
     var tourOffer: Bool = false
+    /// A department's offer to convene the room on this reply's question (`suggest_room`).
+    /// Its own used-flag rather than `actionConsumed`, for the reason `tourOffer` gives above.
+    var roomOffer: RoomOfferDTO?
+    /// True once the founder pressed the offer — it convenes once.
+    var roomOfferUsed: Bool = false
     /// True once the tour has been asked for — hides the chip.
     var tourConsumed: Bool = false
     /// First-run enrichment interview: the gap this message asks about; nil otherwise.

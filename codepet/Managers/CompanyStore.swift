@@ -2173,7 +2173,7 @@ final class CompanyStore: ObservableObject {
                                           // What the founder pinned on the `+` menu, rendered above the
                                           // ranker's guesses and excluded from them. Empty for every
                                           // caller that passes nothing.
-                                          pinned: pinned, departmentWork: deskWork),
+                                          pinned: pinned, departmentWork: deskWork, today: Date()),
             history: Array(history), userMessage: text, runnable: Array(runnable),
             openTasks: Array(openTasks), envSetup: envSetup,
             // nil at defaults, so an untouched settings panel adds nothing to the wire

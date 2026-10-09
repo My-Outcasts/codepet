@@ -142,6 +142,16 @@ enum ChatContext {
     /// Render a compact per-department status snapshot — one line per department that
     /// has at least one task assigned (fully-untouched departments are skipped), mirroring
     /// web's deptSummary (`- name (status, N to do): focus`).
+    /// "Today is 2026-10-09 (October 2026)." — ISO for arithmetic, the month name so "8 months
+    /// from now" lands on a month the model can name without converting.
+    static func composeToday(_ date: Date) -> String {
+        let iso = DateFormatter(), month = DateFormatter()
+        for f in [iso, month] { f.locale = Locale(identifier: "en_US_POSIX"); f.calendar = Calendar(identifier: .gregorian) }
+        iso.dateFormat = "yyyy-MM-dd"
+        month.dateFormat = "LLLL yyyy"
+        return "Today is \(iso.string(from: date)) (\(month.string(from: date))). Count any deadline or runway from this date."
+    }
+
     /// How many of the department's own deliverables the desk excerpts, newest first.
     static let deskWorkCap = 4
     /// How many of the department's own notes (decisions tagged with its `dept`) the desk lists.
@@ -312,8 +322,14 @@ enum ChatContext {
                          product: String? = nil,
                          library: [Deliverable] = [], query: String? = nil,
                          focusDepartment: Department? = nil, memoryEnabled: Bool = true,
-                         pinned: [ContextPin] = [], departmentWork: [Deliverable] = []) -> String {
+                         pinned: [ContextPin] = [], departmentWork: [Deliverable] = [],
+                         today: Date? = nil) -> String {
         var parts: [String] = []
+        // First, so the backend's CONTEXT_CAP clip can never trim it. 9 Oct: told "runway is
+        // 8 months" on 9 Oct 2026, Finance dated the deadline "June 2026" — nothing in the
+        // context said what today was. Here rather than in the cached system prompt, which
+        // must stay identical across days for the prefix cache to hit.
+        if let today { parts.append(composeToday(today)) }
         // Memory off composes nothing from `decisions` — the desk's notes included.
         // `decisions` is already the applicable set (`CompanyStore.applicableDecisions`), so the
         // desk can never show another project's note: it reads only this parameter.

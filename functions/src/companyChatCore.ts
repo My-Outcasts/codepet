@@ -5,6 +5,22 @@
 // departments.ts is static curated data with no imports of its own, so it stays inside the
 // "pure logic, unit-testable" boundary this file is built on.
 import { departmentBrief, DEPARTMENT_NAMES } from "./departments";
+// registry.ts is safe to import here for the same reason: it reaches only anthropicCore (model
+// ids, no SDK), preamble and types. Nothing in that graph pulls a handler into the chat sidecar.
+import { AGENT_DEFS } from "./company/registry";
+import { AgentId } from "./company/types";
+
+// Chat's department keys are the short native ones; the room's are the agent ids.
+const ROOM_AGENT_FOR: Record<string, AgentId> = {
+  eng: "engineering",
+  design: "design",
+  mkt: "marketing",
+  sales: "sales",
+  support: "support",
+  fin: "finance",
+  ops: "operations",
+  legal: "legal",
+};
 
 export interface Companion {
   name: string;
@@ -92,7 +108,8 @@ export function buildSystemPrompt(args: { companionId: string; language: string;
   const deptName = args.deptKey ? DEPARTMENT_NAMES[args.deptKey] : undefined;
   const deptBlock = dept && deptName
     ? `\n\nYou are answering as the ${deptName} function of the founder's company. This is what that function owns:\n${dept}\n` +
-      `Answer from that expertise — the specifics this function would actually know — not as a generalist who has been told the topic.\n`
+      `Answer from that expertise — the specifics this function would actually know — not as a generalist who has been told the topic.\n` +
+      roleBlock(args.deptKey)
     : "";
   return (
     `You are ${c.name}, the AI building companion inside Codepet — a senior operator who helps a solo founder build and understand their whole company, department by department.\n\n` +
@@ -111,6 +128,25 @@ export function buildSystemPrompt(args: { companionId: string; language: string;
     // way to either. The app now can, and this names the one place it lives.
     `If the founder is describing a different business from the one in their company context, do not offer to rebuild or change it yourself — you cannot. Tell them that Settings → Company → "Start a different business" sets up a new company with its own roadmap, and that their current work stays viewable in the Library.` +
     vi
+  );
+}
+
+// The room's head of this department — lens, metrics, where it pushes back, its characteristic
+// failure — so a question asked in chat gets the same Finance the room convenes. 9 Oct: until
+// then only the room read these, and Ask got a mandate and a skill list. Still inside the cached
+// static block: the role text is shared by every founder asking that department.
+//
+// The role prompts were written for a room of peers ("On Marketing when…"), so the framing says
+// which parts apply here. The on-record rule is the guard that matters: a department answering
+// from expertise fills a gap with a plausible number, and the founder asked for THEIR number.
+function roleBlock(deptKey?: string | null): string {
+  const agent = deptKey ? ROOM_AGENT_FOR[deptKey] : undefined;
+  const role = agent ? AGENT_DEFS[agent]?.role : undefined;
+  if (!role) return "";
+  return (
+    `\nThis is how the head of that department thinks. In this chat you speak with the founder one to one, so use the lens, the metrics and the pushback; the lines about other departments tell you when to say "this one needs Marketing too", not that they are in the conversation.\n` +
+    `${role}\n\n` +
+    `Answer from the founder's company as it is on record in the context below — their numbers, their deliverables, their decisions. When a figure this answer depends on is not on record (runway, price, a conversion rate), say plainly that it is not on record, give the answer under a clearly labelled assumption if one helps, and ask the founder for the real figure. Never present an invented number as theirs. Showing your arithmetic can take a few more lines than usual; that is fine.\n`
   );
 }
 

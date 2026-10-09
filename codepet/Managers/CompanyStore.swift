@@ -2152,6 +2152,13 @@ final class CompanyStore: ObservableObject {
         // department's expertise.
         let specialist = speakerFor(task: aboutTask, text: text, department: department)
         let deptKey = deptKeyFor(task: aboutTask, text: text, department: department)
+        // The desk follows the SAME department the prompt answers as — resolved from the task,
+        // the chip or the text — so "ask finance about runway" gets Finance's lens AND Finance's
+        // numbers, not the lens over a context that never heard of either.
+        let deskDepartment = DepartmentCatalog.find(deptKey) ?? department
+        let deskWork = deskDepartment.map { dep in
+            company.library.filter { self.deptKey(forSourceTaskId: $0.sourceTaskId) == dep.key }
+        } ?? []
         let req = CompanyChatRequest(
             companyId: companyId, language: language.rawValue,
             // The specialist when one leads, else the founder's own companion. Falling back
@@ -2161,12 +2168,12 @@ final class CompanyStore: ObservableObject {
             // the Memory panel must not come back through grounding.
             context: ChatContext.compose(brief: company.brief, tasks: company.tasks, decisions: applicableDecisions,
                                           product: productDossier?.contextBlock,
-                                          library: company.library, query: text, focusDepartment: department,
+                                          library: company.library, query: text, focusDepartment: deskDepartment,
                                           memoryEnabled: company.founderPrefs.memoryEnabled,
                                           // What the founder pinned on the `+` menu, rendered above the
                                           // ranker's guesses and excluded from them. Empty for every
                                           // caller that passes nothing.
-                                          pinned: pinned),
+                                          pinned: pinned, departmentWork: deskWork),
             history: Array(history), userMessage: text, runnable: Array(runnable),
             openTasks: Array(openTasks), envSetup: envSetup,
             // nil at defaults, so an untouched settings panel adds nothing to the wire

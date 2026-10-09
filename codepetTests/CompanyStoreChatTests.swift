@@ -496,6 +496,23 @@ final class CompanyStoreChatTests: XCTestCase {
         XCTAssertNil(s.company.decisions.first { $0.topic == "goal" }?.dept)
     }
 
+    /// The request's context says what day it is — the compose tests alone pass even if the
+    /// store stops passing a date. 9 Oct: Finance dated an 8-month runway "June 2026".
+    func testTheChatRequestCarriesTodaysDate() async {
+        var context = ""
+        let streamer: (CompanyChatRequest) -> AsyncThrowingStream<CompanyChatStreamEvent, Error> = { req in
+            context = req.context
+            return AsyncThrowingStream { c in
+                c.yield(.delta("hi")); c.yield(.done(model: "m", cacheHit: false, action: ChatDoneAction())); c.finish()
+            }
+        }
+        let s = CompanyStore(loader: { _ in .empty }, saver: { _, _ in true },
+                             chatSender: { _ in nil }, chatStreamer: streamer)
+        await s.hydrate(companyId: "u")
+        await s.sendChat("how long is our runway?", language: .en)
+        XCTAssertTrue(context.hasPrefix(ChatContext.composeToday(Date())), context)
+    }
+
     /// `sendChat` populates `env_setup` from the company's currently-OFF toolkit
     /// items (mirrors the web's off-toolkit filter) — AND, since the
     /// environment-honesty pass, only from items that are actually built.

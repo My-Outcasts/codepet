@@ -179,6 +179,37 @@ export function parseRoutingToolInput(
  * The single injection seam for every LLM phase. The real implementation lives
  * in virtualCompany.ts; tests pass fakes so no phase needs network mocking.
  */
+/**
+ * The room the founder asked for, over the router's pick (9 Oct). A department in Ask offers
+ * "Bring Finance + Sales in" (suggest_room) and the founder presses it; without this the router
+ * could still answer single_agent and the escape hatch would discard the room, so the button
+ * would do nothing visible. The router still runs — its real_question frames the room.
+ *
+ * Only departments count: chief_of_staff routes, the red team takes no seat, and product is
+ * kept off the roster (placeholder art), so none of them can be asked for. Fewer than two
+ * departments is not a room, and the routing is returned untouched — the same object, so the
+ * no-agents path is unchanged by construction.
+ */
+export function applyRequestedAgents(routing: RoutingDecision, requested: unknown): RoutingDecision {
+  if (!Array.isArray(requested)) return routing;
+  const picked = [...new Set(requested.filter((a): a is AgentId =>
+    typeof a === "string" && ROUTABLE_AGENTS.includes(a as AgentId) && a !== "devils_advocate" && a !== "product"))]
+    .slice(0, MAX_ROOM_AGENTS);
+  if (picked.length < 2) return routing;
+  const red: AgentId[] = routing.agents.includes("devils_advocate") ? ["devils_advocate"] : [];
+  // The panel renders these fields, so they must agree with the room the founder gets (review,
+  // 9 Oct): no "✗ Sales — not a pricing question" under NOT IN THE ROOM while Sales is in it,
+  // a ✓ line for every department present, and no "Missing: …" ask on a room that is running.
+  const excluded = { ...routing.excluded };
+  const reasons = { ...routing.reason_per_agent };
+  for (const a of picked) {
+    delete excluded[a];
+    if (!reasons[a]) reasons[a] = "Asked for by the founder.";
+  }
+  return { ...routing, decision: "multi_agent", agents: [...picked, ...red],
+    excluded, reason_per_agent: reasons, missing_info: [] };
+}
+
 export type AgentCaller = (args: {
   agent: AgentId;
   model: string;

@@ -576,5 +576,6 @@ export function doneFrame(r: ResolvedActions, model: string): Record<string, unk
   if (r.nav) done.nav = r.nav;
   if (r.setup) done.setup = r.setup;
   if (r.remember.length) done.remember = r.remember;
+  if (r.roomOffer) done.room_offer = r.roomOffer;
   return done;
 }

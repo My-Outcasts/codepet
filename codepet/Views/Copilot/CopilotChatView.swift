@@ -2303,6 +2303,32 @@ struct CopilotBubble: View {
             }
         }
         if let facts = message.noted, !facts.isEmpty { notedInline(facts) }
+        if let offer = message.roomOffer { roomOfferInline(offer) }
+    }
+
+    /// "Bring Finance + Sales in →" with the department's reason under it. Pressing convenes the
+    /// room (a room's cost), so it is disabled while a turn is in flight, and reads as done after.
+    @ViewBuilder private func roomOfferInline(_ offer: RoomOfferDTO) -> some View {
+        let names = RoomInvite.names(offer)
+        VStack(alignment: .leading, spacing: 6) {
+            if message.roomOfferUsed {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(lang == .vi ? "Đã mời \(names) vào bàn" : "Brought \(names) in")
+                }
+                .font(.pixelSystem(size: DraftCardMetrics.chip, weight: .semibold))
+                .foregroundColor(CodepetTheme.accentTeal)
+            } else {
+                chainOfferButton(lang == .vi ? "Mời \(names) vào bàn →" : "Bring \(names) in →", filled: true) {
+                    await companyStore.acceptRoomOffer(messageId: message.id, language: lang)
+                }
+                .disabled(companyStore.isStreaming || companyStore.isCompanionTyping)
+                Text(offer.why)
+                    .font(.pixelSystem(size: 11))
+                    .foregroundColor(CodepetTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     /// The messages the companion wrote, each in the same card the Library uses for an

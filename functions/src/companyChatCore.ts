@@ -1045,6 +1045,46 @@ const MAX_DRAFT_BODY = 4000;
 const MAX_DRAFT_SUBJECT = 200;
 const MAX_DRAFT_TO = 120;
 
+// 9 Oct: since #247 a department in Ask is told to say "this one needs Marketing too", and the
+// founder could do nothing with that sentence. This turns it into an offer the founder presses;
+// the room convenes (and costs a room) only then. Offered only on a department's turn — see the
+// tools list in buildChatRequest.
+export interface RoomOfferIntent {
+  departments: string[];
+  question: string;
+  why: string;
+}
+
+export const SUGGEST_ROOM_TOOL = {
+  name: "suggest_room",
+  description:
+    "Offer to bring other departments into the room on this question. Use ONLY while answering as a department, and only when the question pulls another department's interest the opposite way (price vs. pipeline, speed vs. safety). A one-dimensional question you answer yourself. This is an offer: nothing convenes until the founder presses it, so still give your own answer in the reply.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      departments: {
+        type: "array",
+        items: { type: "string", enum: Object.keys(ROOM_AGENT_FOR) },
+        description: "2-4 department keys, including your own.",
+      },
+      question: { type: "string", description: "The question for the room, one sentence." },
+      why: { type: "string", description: "Why it needs more than you — one short line the founder reads." },
+    },
+    required: ["departments", "question", "why"],
+  },
+};
+
+/** A bad offer is dropped, never a failed turn: the reply stands without a card. */
+export function coerceRoomOffer(input: unknown): RoomOfferIntent | null {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const raw = Array.isArray(o.departments) ? o.departments : [];
+  const departments = [...new Set(raw.filter((k): k is string => typeof k === "string" && k in ROOM_AGENT_FOR))].slice(0, 4);
+  const question = clip(o.question, 300);
+  const why = clip(o.why, 160);
+  if (departments.length < 2 || !question || !why) return null;
+  return { departments, question, why };
+}
+
 export const DRAFT_MESSAGE_TOOL = {
   name: "draft_message",
   description:
@@ -1332,6 +1372,8 @@ export interface ResolvedActions {
   addTasks: NewTaskIntent[];
   reviseWork: ReviseWorkIntent | null;
   drafts: MessageDraftIntent[] | null;
+  /** Optional so every existing literal of this shape still compiles; absent means none. */
+  roomOffer?: RoomOfferIntent | null;
 }
 
 export function resolveActions(
@@ -1393,8 +1435,11 @@ export function resolveActions(
   // Independent of everything above: a drafted message is CONTENT, not an action, so it
   // neither excludes nor is excluded by a verb that mutates something.
   const drafts = draftUse ? validateDraftMessageToolUse(draftUse.input) : null;
+  // Independent of every verb above, like remember_fact: an offer rides beside the answer.
+  const roomUse = toolUses.find((t) => t.name === "suggest_room");
+  const roomOffer = roomUse ? coerceRoomOffer(roomUse.input) : null;
 
-  return { runTaskId, nav, setup, remember, completeTaskId, addTask, addTasks, reviseWork, drafts };
+  return { runTaskId, nav, setup, remember, completeTaskId, addTask, addTasks, reviseWork, drafts, roomOffer };
 }
 
 
@@ -1466,6 +1511,7 @@ export function buildChatRequest(
     NAVIGATE_TOOL,
     ...(envSetup.length ? [SETUP_TOOL] : []),
     REMEMBER_TOOL,
+    ...(typeof body.dept_key === "string" && ROOM_AGENT_FOR[body.dept_key] ? [SUGGEST_ROOM_TOOL] : []),
     ...(skills.has("web-research") ? [WEB_SEARCH_TOOL] : []),
     ...extraToolsets,
   ];

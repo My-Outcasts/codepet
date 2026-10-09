@@ -148,7 +148,7 @@ function roleBlock(deptKey?: string | null): string {
     // Measured 9 Oct: told only to SAY another department was needed, the model said so in
     // prose and called suggest_room 0/3 times on a real request with a folder linked. Naming
     // the tool at this point is what turns the sentence into the founder's button.
-    `When the question pulls another department's interest against yours (the same money, the same week, price against pipeline), give your own answer AND call suggest_room naming those departments, so the founder can bring them in with one press. Saying "this needs Sales too" without calling it leaves them nothing to press.\n` +
+    `When the question pulls another department's interest against yours (the same money, the same week, price against pipeline), give your own answer AND call suggest_room naming those departments, so the founder can bring them in with one press — the button appears below your reply, so if you point to it, say below. Saying "this needs Sales too" without calling it leaves them nothing to press.\n` +
     `${role}\n\n` +
     `Answer from the founder's company as it is on record in the context below — their numbers, their deliverables, their decisions. When a figure this answer depends on is not on record (runway, price, a conversion rate), say plainly that it is not on record, give the answer under a clearly labelled assumption if one helps, and ask the founder for the real figure. Never present an invented number as theirs. Showing your arithmetic can take a few more lines than usual; that is fine.\n`
   );
@@ -1062,7 +1062,7 @@ export interface RoomOfferIntent {
 export const SUGGEST_ROOM_TOOL = {
   name: "suggest_room",
   description:
-    "Offer to bring other departments into the room on this question. Use ONLY while answering as a department, and only when the question pulls another department's interest the opposite way (price vs. pipeline, speed vs. safety). A one-dimensional question you answer yourself. This is an offer: nothing convenes until the founder presses it, so still give your own answer in the reply.",
+    "Offer to bring other departments into the room on this question. Use ONLY while answering as a department, and only when the question pulls another department's interest the opposite way (price vs. pipeline, speed vs. safety). A one-dimensional question you answer yourself. This is an offer: nothing convenes until the founder presses it, so still give your own answer in the reply. The button appears below your reply — if you point to it, say below, never above.",
   input_schema: {
     type: "object" as const,
     properties: {

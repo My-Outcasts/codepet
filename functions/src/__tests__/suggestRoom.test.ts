@@ -1,4 +1,4 @@
-import { coerceRoomOffer, resolveActions, buildChatRequest, buildSystemPrompt } from "../companyChatCore";
+import { coerceRoomOffer, resolveActions, buildChatRequest, buildSystemPrompt, SUGGEST_ROOM_TOOL } from "../companyChatCore";
 import { doneFrame } from "../local/chatSidecar";
 
 // 9 Oct: since #247 a department in Ask is told to say "this one needs Marketing too", and the
@@ -64,5 +64,15 @@ describe("the department is told to offer the room, not just mention it", () => 
   });
   it("says nothing about it on an ordinary turn", () => {
     expect(buildSystemPrompt({ companionId: "byte", language: "en" })).not.toMatch(/suggest_room/);
+  });
+});
+
+// 9 Oct, in the app: the reply said "press the room button above" — the card draws BELOW the
+// reply (CopilotChatView.inlineActions), the same mistake the draft cards had on build 10.
+describe("the room button is below the reply", () => {
+  it("says below, never above, wherever the button is mentioned", () => {
+    const p = buildSystemPrompt({ companionId: "crash", language: "en", deptKey: "fin" });
+    expect(SUGGEST_ROOM_TOOL.description).toMatch(/below your reply/);
+    expect(p).toMatch(/below your reply/);
   });
 });

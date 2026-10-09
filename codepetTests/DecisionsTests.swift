@@ -19,11 +19,11 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(out.map { $0.topic }, ["naming", "tech"])
     }
     func testMergeDropsEmptyAndCapsKeepingRecent() {
-        let existing = (0..<30).map { DecisionEntry(topic: "t\($0)", statement: "s", source: nil, updatedAt: Double($0)) }
+        let existing = (0..<Decisions.MAX_DECISIONS).map { DecisionEntry(topic: "t\($0)", statement: "s", source: nil, updatedAt: Double($0)) }
         let out = Decisions.mergeDecisions(existing: existing,
             extracted: [ExtractedDecision(topic: "", statement: "x", source: nil),
                         ExtractedDecision(topic: "new", statement: "recent", source: nil)], now: 999)
-        XCTAssertEqual(out.count, 30)
+        XCTAssertEqual(out.count, Decisions.MAX_DECISIONS)
         XCTAssertTrue(out.contains { $0.topic == "new" })   // newest kept
         XCTAssertFalse(out.contains { $0.topic == "t0" })   // oldest evicted
     }
@@ -48,10 +48,10 @@ final class DecisionsTests: XCTestCase {
     }
 
     func testNormalizeCapsKeepingRecent() {
-        let entries = (0..<31).map { DecisionEntry(topic: "t\($0)", statement: "s", source: nil, updatedAt: Double($0)) }
+        let entries = (0...Decisions.MAX_DECISIONS).map { DecisionEntry(topic: "t\($0)", statement: "s", source: nil, updatedAt: Double($0)) }
         let out = Decisions.normalizeDecisions(entries)
-        XCTAssertEqual(out.count, 30)
-        XCTAssertTrue(out.contains { $0.topic == "t30" })   // newest kept
+        XCTAssertEqual(out.count, Decisions.MAX_DECISIONS)
+        XCTAssertTrue(out.contains { $0.topic == "t\(Decisions.MAX_DECISIONS)" })   // newest kept
         XCTAssertFalse(out.contains { $0.topic == "t0" })   // oldest evicted
     }
 }

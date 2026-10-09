@@ -348,6 +348,14 @@ struct CompanyChatReply: Equatable {
     }
 }
 
+/// A department's offer to bring others into the room (`suggest_room`, 9 Oct). Native keys
+/// (`fin`, `sales`…) — `RoomOffer.roomAgentId(for:)` maps them for the room request.
+struct RoomOfferDTO: Codable, Equatable {
+    let departments: [String]
+    let question: String
+    let why: String
+}
+
 // MARK: - Streaming
 
 /// The actions a `done` frame (or the JSON fallback response) can carry.
@@ -371,11 +379,13 @@ struct ChatDoneAction: Equatable {
     /// The messages the companion wrote this turn. Independent of every verb above — content,
     /// not an action — so a turn may carry drafts alongside any of them.
     let drafts: [MessageDraftDTO]
+    /// An offer to convene the room on this question — content beside any verb, like `drafts`.
+    let roomOffer: RoomOfferDTO?
 
     init(runTaskId: String? = nil, nav: NavAction? = nil, setup: SetupAction? = nil,
          remember: [RememberedFact] = [], completeTaskId: String? = nil,
          addTask: AddTaskDTO? = nil, addTasks: [AddTaskDTO] = [], reviseWork: ReviseWorkDTO? = nil,
-         drafts: [MessageDraftDTO] = []) {
+         drafts: [MessageDraftDTO] = [], roomOffer: RoomOfferDTO? = nil) {
         self.runTaskId = runTaskId
         self.nav = nav
         self.setup = setup
@@ -385,6 +395,7 @@ struct ChatDoneAction: Equatable {
         self.addTasks = addTasks
         self.reviseWork = reviseWork
         self.drafts = drafts
+        self.roomOffer = roomOffer
     }
 }
 
@@ -642,6 +653,7 @@ enum CompanyChatClient {
                 let addTasks: [AddTaskDTO]?
                 let reviseWork: ReviseWorkDTO?
                 let drafts: [MessageDraftDTO]?
+                let roomOffer: RoomOfferDTO?
                 enum CodingKeys: String, CodingKey {
                     case model; case cacheHit = "cache_hit"; case runTaskId = "run_task_id"
                     case nav; case setup; case remember
@@ -649,6 +661,7 @@ enum CompanyChatClient {
                     case addTasks = "add_tasks"
                     case reviseWork = "revise_work"
                     case drafts
+                    case roomOffer = "room_offer"
                 }
             }
             if let d = try? JSONDecoder().decode(DonePayload.self, from: payload) {
@@ -656,7 +669,8 @@ enum CompanyChatClient {
                                              remember: d.remember ?? [],
                                              completeTaskId: d.completeTaskId, addTask: d.addTask,
                                              addTasks: d.addTasks ?? [],
-                                             reviseWork: d.reviseWork, drafts: d.drafts ?? [])
+                                             reviseWork: d.reviseWork, drafts: d.drafts ?? [],
+                                             roomOffer: d.roomOffer)
                 continuation.yield(.done(model: d.model, cacheHit: d.cacheHit, action: action))
             } else {
                 // Worse than a dropped delta: with no `done` the store falls back to the

@@ -21,10 +21,14 @@ struct VirtualCompanyRequest: Codable, Equatable {
     let language: String
     let founder: VCFounder
     let stressTest: Bool
+    /// Room agent ids the founder asked for ("Bring Finance + Sales in", 9 Oct). nil for every
+    /// other run, and nil is not encoded, so those requests are byte-identical to before.
+    var agents: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case request, language, founder
         case stressTest = "stress_test"
+        case agents
     }
 }
 

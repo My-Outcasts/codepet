@@ -130,4 +130,16 @@ final class ChatContextDepartmentDeskTests: XCTestCase {
         let out = ChatContext.compose(brief: brief, tasks: [], decisions: ds, focusDepartment: finance)
         XCTAssertTrue(out.contains("Sales says $29"))
     }
+
+    /// End to end through the merge: once Sales re-records Finance's price, Finance's desk no
+    /// longer lists it and Sales' does.
+    func testAReRecordedTopicMovesDesks() {
+        let fin = Decisions.mergeDecisions(existing: [], extracted: [ExtractedDecision(topic: "pricing", statement: "$19", source: nil)],
+                                           now: 1, dept: "fin")
+        let both = Decisions.mergeDecisions(existing: fin, extracted: [ExtractedDecision(topic: "pricing", statement: "$29", source: nil)],
+                                            now: 2, dept: "sales")
+        XCTAssertEqual(notes(in: ChatContext.compose(brief: brief, tasks: [], decisions: both, focusDepartment: finance)), [])
+        XCTAssertEqual(notes(in: ChatContext.compose(brief: brief, tasks: [], decisions: both, focusDepartment: sales), "Sales"),
+                       ["- pricing: $29"])
+    }
 }

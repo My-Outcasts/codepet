@@ -39,4 +39,13 @@ final class DepartmentNotebookTests: XCTestCase {
         let out = String(data: try JSONEncoder().encode(d), encoding: .utf8)!
         XCTAssertFalse(out.contains("dept"))
     }
+
+    /// A company-wide re-record (a room lock-in, an ordinary turn) takes the topic off the
+    /// department's desk: one truth per topic, and that truth is now nobody's in particular.
+    func testReRecordingWithoutADepartmentClearsTheTag() {
+        let a = Decisions.mergeDecisions(existing: [], extracted: [x("pricing", "$19")], now: 1, dept: "fin")
+        let b = Decisions.mergeDecisions(existing: a, extracted: [x("pricing", "$24")], now: 2)
+        XCTAssertEqual(b.count, 1)
+        XCTAssertNil(b.first?.dept)
+    }
 }

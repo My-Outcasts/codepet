@@ -492,6 +492,10 @@ final class CompanyStoreChatTests: XCTestCase {
                              chatStreamer: Self.streamer(deltas: ["Noted"], remember: [fact]),
                              decisionsSaver: { _, _ in true })
         await s.hydrate(companyId: "u")
+        // A Finance turn first: the ordinary turn after it must not inherit the department —
+        // and re-recording the same topic without one moves it off Finance's desk.
+        await s.sendChat("ten paying founders is the goal", language: .en, department: DepartmentCatalog.find("fin"))
+        XCTAssertEqual(s.company.decisions.first { $0.topic == "goal" }?.dept, "fin")
         await s.sendChat("ten paying founders is the goal", language: .en)
         XCTAssertNil(s.company.decisions.first { $0.topic == "goal" }?.dept)
     }

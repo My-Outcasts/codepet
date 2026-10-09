@@ -73,4 +73,43 @@ final class ChatContextDepartmentDeskTests: XCTestCase {
         XCTAssertFalse(out.contains("desk"))
         XCTAssertFalse(out.contains("8 months at current burn"))
     }
+
+    // MARK: - The department's notebook (2026-10-09)
+
+    /// The "- topic: statement" lines under "<Dept> has noted:", and nothing after them.
+    private func notes(in out: String, _ dept: String = "Finance") -> [String] {
+        guard let after = out.components(separatedBy: "\(dept) has noted:\n").dropFirst().first else { return [] }
+        return Array(after.components(separatedBy: "\n").prefix { $0.hasPrefix("- ") })
+    }
+
+    private func note(_ topic: String, _ s: String, dept: String?, at t: Double = 1) -> DecisionEntry {
+        DecisionEntry(topic: topic, statement: s, source: nil, updatedAt: t, scope: nil, dept: dept)
+    }
+
+    func testTheDeskListsOnlyItsOwnNotesAndTheDecisionsBlockDoesNotRepeatThem() {
+        let ds = [note("runway", "runway noted at 7 months", dept: "fin"), note("pitch", "one line", dept: "mkt"),
+                  note("goal", "ten founders", dept: nil)]
+        let out = ChatContext.compose(brief: brief, tasks: [], decisions: ds, focusDepartment: finance)
+        XCTAssertTrue(out.contains("Finance has noted:"))
+        XCTAssertEqual(out.components(separatedBy: "runway noted at 7 months").count - 1, 1, "on the desk, not again below")
+        XCTAssertTrue(out.contains("- goal: ten founders"), "company-wide stays in the decisions block")
+        XCTAssertEqual(notes(in: out), ["- runway: runway noted at 7 months"])
+    }
+
+    func testNotesAreNewestFirstAndCapped() {
+        let ds = (0..<10).map { note("t\($0)", "s\($0)", dept: "fin", at: Double($0)) }
+        let out = ChatContext.compose(brief: brief, tasks: [], decisions: ds, focusDepartment: finance)
+        let desk = notes(in: out)
+        XCTAssertEqual(desk.count, ChatContext.deskNotesCap)
+        XCTAssertEqual(desk.first, "- t9: s9")
+        XCTAssertFalse(desk.contains("- t1: s1"))
+        XCTAssertTrue(out.contains("- t1: s1"), "an older note stays in the decisions block, it is not lost")
+    }
+
+    func testMemoryOffMeansNoNotes() {
+        let out = ChatContext.compose(brief: brief, tasks: [], decisions: [note("runway", "runway noted at 7 months", dept: "fin")],
+                                      focusDepartment: finance, memoryEnabled: false)
+        XCTAssertFalse(out.contains("runway noted at 7 months"))
+        XCTAssertFalse(out.contains("has noted"))
+    }
 }

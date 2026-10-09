@@ -144,6 +144,8 @@ enum ChatContext {
     /// web's deptSummary (`- name (status, N to do): focus`).
     /// How many of the department's own deliverables the desk excerpts, newest first.
     static let deskWorkCap = 4
+    /// How many of the department's own notes (decisions tagged with its `dept`) the desk lists.
+    static let deskNotesCap = 8
 
     /// The brief fields each department owns. `goal` is everyone's. 9 Oct: until the desk, five
     /// fields the interview collects (`goal`, `traction`, `problem`, `runway`, `constraints`)
@@ -165,11 +167,17 @@ enum ChatContext {
     /// resolver, and it needs the team runs this pure function does not have). An empty owned
     /// field is written as "not on record" so the department names the gap instead of filling it.
     private static func composeDesk(_ dep: Department, brief: CompanyBrief, tasks: [RoadmapTask],
-                                    work: [Deliverable]) -> String {
+                                    work: [Deliverable], notes: [DecisionEntry] = []) -> String {
         var lines = ["\(dep.name) desk — what this department has on record:"]
         for f in ownedFields(dep.key) {
             let v = (brief[keyPath: f.value] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             lines.append("- \(f.label): \(v.isEmpty ? "not on record" : String(v.prefix(400)))")
+        }
+        // What this department noted itself — in chat or from its approved work. Its own memory,
+        // so it answers "8 months" next week instead of "not on record" again.
+        if !notes.isEmpty {
+            lines.append("\(dep.name) has noted:")
+            lines.append(contentsOf: notes.map { "- \($0.topic): \($0.statement)" })
         }
         let mine = tasks.filter { $0.dept == dep.key }
         let done = mine.filter(\.done).prefix(6).map(\.title)
@@ -303,15 +311,26 @@ enum ChatContext {
                          focusDepartment: Department? = nil, memoryEnabled: Bool = true,
                          pinned: [ContextPin] = [], departmentWork: [Deliverable] = []) -> String {
         var parts: [String] = []
+        // Memory off composes nothing from `decisions` — the desk's notes included.
+        // `decisions` is already the applicable set (`CompanyStore.applicableDecisions`), so the
+        // desk can never show another project's note: it reads only this parameter.
+        let usable = memoryEnabled ? decisions : []
+        let deskNotes = focusDepartment.map { dep in
+            Array(usable.filter { $0.dept == dep.key }
+                .sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
+                .prefix(deskNotesCap))
+        } ?? []
+        let noted = Set(deskNotes.map(Decisions.identity))
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
         if let dep = focusDepartment {
             parts.append("The founder is focused on the \(dep.name) department right now — "
                 + "prioritize \(dep.name) in your answer: \(dep.focus)")
-            parts.append(composeDesk(dep, brief: brief, tasks: tasks, work: departmentWork))
+            parts.append(composeDesk(dep, brief: brief, tasks: tasks, work: departmentWork, notes: deskNotes))
         }
         // Excerpted on the desk already, so the ranker below must not spend a slot repeating it.
         let deskIds = focusDepartment == nil ? Set<String>() : Set(departmentWork.prefix(deskWorkCap).map(\.id))
-        let d = memoryEnabled ? Decisions.composeDecisions(decisions) : ""
+        // On the desk already, so not repeated here.
+        let d = Decisions.composeDecisions(usable.filter { !noted.contains(Decisions.identity($0)) })
         if !d.isEmpty { parts.append(d) }
         parts.append("Roadmap progress: \(RoadmapEngine.progressPercent(tasks))%.")
         if let next = RoadmapEngine.nextStep(tasks) {

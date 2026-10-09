@@ -198,6 +198,23 @@ final class CompanyStoreRunTaskTests: XCTestCase {
         XCTAssertEqual(s.company.decisions.first?.topic, "pricing")
         XCTAssertEqual(savedDecisions?.first?.statement, "Plus $4/mo")
     }
+    /// The deliverable's department is the one that noted what approving it decided.
+    func testApproveTagsExtractedDecisionsWithTheDeliverablesDepartment() async {
+        let drafted = RoadmapTask(id: "t1", title: "T", detail: "", phase: .find, who: .does, drafted: true,
+                                  dept: "fin", draft: Deliverable(kind: .doc, title: "Pricing", body: "Pro $19", sourceTaskId: "t1"))
+        let seed = CompanyState(brief: .init(), departments: [], library: [], stage: .building,
+                                companionId: "byte", onboardedAt: Date(), tasks: [drafted])
+        let s = CompanyStore(loader: { _ in seed },
+                             tasksSaver: { _, _ in true },
+                             librarySaver: { _, _ in true },
+                             firstApprovalSaver: { _, _ in true },
+                             decisionsSaver: { _, _ in true },
+                             decisionExtractor: { _, _ in [ExtractedDecision(topic: "price", statement: "Pro $19", source: nil)] })
+        await s.hydrate(companyId: "u")
+        await s.approveTask(id: "t1")
+        await Task.yield(); try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(s.company.decisions.first { $0.topic == "price" }?.dept, "fin")
+    }
     func testReviseTaskDraftReplacesDraftInPlaceAndPersists() async {
         var savedTasks: [RoadmapTask] = []
         var sentReq: RunTaskRequest?

@@ -29,6 +29,7 @@ Backend owner: logic/BE. UI owner: separate engineer. **This document is the bou
 | `founder.stage` | yes | Runway, revenue, user count |
 | `founder.constraints` | yes | Array of strings; `[]` is valid |
 | `stress_test` | no | `true` forces the red team to run even when the departments already disagree |
+| `agents` | no | Room agent ids the founder asked for (`"finance"`, `"sales"`, …), from a department's "bring them in" offer (2026-10-09). Must be an array of strings or the run is a 400. Only departments count (not `chief_of_staff`, `devils_advocate` or `product`), deduplicated and capped at 4. With two or more, the room runs with exactly those, plus `devils_advocate` if the router named it. With fewer, the field is ignored |
 
 ## Non-SSE error responses
 
@@ -62,7 +63,7 @@ These come back as plain JSON with a non-200 status — no event stream is opene
 
 ### Two flows that skip most events
 
-**Escape hatch.** When the router decides the request does not need the company (`routing.decision` is `"single_agent"` or `"needs_clarification"`), the stream is: `run_started` → `routing` → `telemetry` → `done` with `skipped` set to that decision. No positions, no conflicts, no brief. This is a correct and common outcome — a founder asking a one-dimensional question should not see four columns spin up. Render the routing panel and the reason, and for `needs_clarification` surface `missing_info` as the ask.
+**Escape hatch.** When the router decides the request does not need the company (`routing.decision` is `"single_agent"` or `"needs_clarification"`), the stream is: `run_started` → `routing` → `telemetry` → `done` with `skipped` set to that decision. No positions, no conflicts, no brief. This is a correct and common outcome — a founder asking a one-dimensional question should not see four columns spin up. Render the routing panel and the reason, and for `needs_clarification` surface `missing_info` as the ask. **A founder-picked room never escapes:** with two or more valid `agents`, `routing.decision` is `"multi_agent"` with those agents, whatever the router chose; `real_question` and `request_type` are still the router's.
 
 **Nothing to debate.** When both departments agree, `conflicts` arrives with all pairs `ALIGNED` and **no `negotiation_round` events follow**. The brief still arrives.
 

@@ -19,7 +19,7 @@
  */
 
 import { AgentCaller } from "./router";
-import { runIntake } from "./router";
+import { applyRequestedAgents, runIntake } from "./router";
 import { runIndependentPass } from "./independentPass";
 import { detectConflicts, needsNegotiation } from "./conflicts";
 import { runNegotiation } from "./negotiation";
@@ -37,6 +37,8 @@ export interface RunPayload {
   language: "vi" | "en";
   founder: { profile: string; stage: string; constraints: string[] };
   stress_test?: boolean;
+  /** Room agent ids the founder asked for (suggest_room). See `applyRequestedAgents`. */
+  agents?: string[];
 }
 
 export function validateRunPayload(body: unknown): string | null {
@@ -65,6 +67,9 @@ export function validateRunPayload(body: unknown): string | null {
 
   if (b.stress_test !== undefined && typeof b.stress_test !== "boolean") {
     return "stress_test must be a boolean";
+  }
+  if (b.agents !== undefined && !(Array.isArray(b.agents) && b.agents.every((a) => typeof a === "string"))) {
+    return "agents must be an array of strings";
   }
   return null;
 }
@@ -123,6 +128,8 @@ export async function runVirtualCompany(args: {
 
     // ── Phase 1: intake ──
     const intake = await runIntake({ founder, rawRequest: payload.request, call });
+    // The founder's pick wins over the router's (suggest_room); untouched without one.
+    intake.routing = applyRequestedAgents(intake.routing, payload.agents);
     bb = recordUsage(bb, "chief_of_staff", ROUTER_MODEL, intake.usage);
     bb = {
       ...bb,

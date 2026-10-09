@@ -142,6 +142,55 @@ enum ChatContext {
     /// Render a compact per-department status snapshot — one line per department that
     /// has at least one task assigned (fully-untouched departments are skipped), mirroring
     /// web's deptSummary (`- name (status, N to do): focus`).
+    /// How many of the department's own deliverables the desk excerpts, newest first.
+    static let deskWorkCap = 4
+
+    /// The brief fields each department owns. `goal` is everyone's. 9 Oct: until the desk, five
+    /// fields the interview collects (`goal`, `traction`, `problem`, `runway`, `constraints`)
+    /// reached no prompt at all; here each goes to the department whose answer depends on it.
+    private static func ownedFields(_ key: String) -> [(label: String, value: KeyPath<CompanyBrief, String?>)] {
+        let goal = ("Founder's goal for the next few weeks", \CompanyBrief.goal)
+        switch key {
+        case "fin": return [goal, ("Runway", \.runway), ("Constraints", \.constraints)]
+        case "sales": return [goal, ("Traction", \.traction)]
+        case "mkt": return [goal, ("Traction", \.traction), ("Problem it solves", \.problem)]
+        case "design": return [goal, ("Problem it solves", \.problem)]
+        case "ops", "legal": return [goal, ("Constraints", \.constraints)]
+        default: return [goal]
+        }
+    }
+
+    /// The asked department's own desk: the brief fields it owns, its filed work, its tasks.
+    /// `work` is pre-filtered by the caller (`CompanyStore.deptKey(forSourceTaskId:)` is the one
+    /// resolver, and it needs the team runs this pure function does not have). An empty owned
+    /// field is written as "not on record" so the department names the gap instead of filling it.
+    private static func composeDesk(_ dep: Department, brief: CompanyBrief, tasks: [RoadmapTask],
+                                    work: [Deliverable]) -> String {
+        var lines = ["\(dep.name) desk — what this department has on record:"]
+        for f in ownedFields(dep.key) {
+            let v = (brief[keyPath: f.value] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            lines.append("- \(f.label): \(v.isEmpty ? "not on record" : String(v.prefix(400)))")
+        }
+        let mine = tasks.filter { $0.dept == dep.key }
+        let done = mine.filter(\.done).prefix(6).map(\.title)
+        let open = mine.filter { !$0.done }.prefix(6).map(\.title)
+        if !done.isEmpty { lines.append("Done: " + done.joined(separator: "; ")) }
+        if !open.isEmpty { lines.append("Open: " + open.joined(separator: "; ")) }
+        let filed = work.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }.prefix(deskWorkCap)
+        if filed.isEmpty {
+            lines.append("Nothing filed by \(dep.name) yet.")
+        } else {
+            lines.append("Filed by \(dep.name) — its own work, which it stands behind:")
+            for d in filed {
+                let flat = d.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                let excerpt = flat.count > excerptCap ? String(flat.prefix(excerptCap)) + "…" : flat
+                lines.append("- \(d.title) (\(d.kind.rawValue))" + (excerpt.isEmpty ? "" : ": \(excerpt)"))
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     private static func composeDepartments(_ summaries: [DepartmentSummary]) -> String {
         let active = summaries.filter { $0.status != .later }
         guard !active.isEmpty else { return "" }
@@ -252,13 +301,16 @@ enum ChatContext {
                          product: String? = nil,
                          library: [Deliverable] = [], query: String? = nil,
                          focusDepartment: Department? = nil, memoryEnabled: Bool = true,
-                         pinned: [ContextPin] = []) -> String {
+                         pinned: [ContextPin] = [], departmentWork: [Deliverable] = []) -> String {
         var parts: [String] = []
         parts.append(BriefContext.compose(brief) ?? "No brief yet.")
         if let dep = focusDepartment {
             parts.append("The founder is focused on the \(dep.name) department right now — "
                 + "prioritize \(dep.name) in your answer: \(dep.focus)")
+            parts.append(composeDesk(dep, brief: brief, tasks: tasks, work: departmentWork))
         }
+        // Excerpted on the desk already, so the ranker below must not spend a slot repeating it.
+        let deskIds = focusDepartment == nil ? Set<String>() : Set(departmentWork.prefix(deskWorkCap).map(\.id))
         let d = memoryEnabled ? Decisions.composeDecisions(decisions) : ""
         if !d.isEmpty { parts.append(d) }
         parts.append("Roadmap progress: \(RoadmapEngine.progressPercent(tasks))%.")
@@ -281,11 +333,11 @@ enum ChatContext {
         let pinnedBlock = composePinned(pinned, library: library, tasks: tasks)
         if !pinnedBlock.isEmpty { parts.append(pinnedBlock) }
         let pinnedIds = Set(pinned.compactMap { $0.deliverableId })
-        let prior = selectPriorWork(library, query: query, excluding: pinnedIds)
+        let prior = selectPriorWork(library, query: query, excluding: pinnedIds.union(deskIds))
         let priorBlock = composePriorWork(prior)
         if !priorBlock.isEmpty { parts.append(priorBlock) }
         // Last, because it names what the two blocks above left out.
-        let inventory = composeLibraryInventory(library, shown: pinnedIds.union(prior.map(\.id)))
+        let inventory = composeLibraryInventory(library, shown: pinnedIds.union(deskIds).union(prior.map(\.id)))
         if !inventory.isEmpty { parts.append(inventory) }
         // LAST, and that is load-bearing. The backend clips the whole context
         // (`CONTEXT_CAP`, companyChatCore.ts) and the dossier is up to 6000 characters. It used

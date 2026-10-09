@@ -1,6 +1,7 @@
 import { buildSystemPrompt } from "../companyChatCore";
 import { buildRunTaskPrompt } from "../runTaskCore";
-import { DEPARTMENT_FOUNDATIONS } from "../departments";
+import { DEPARTMENT_FOUNDATIONS, DEPARTMENT_NAMES } from "../departments";
+import { AGENT_DEFS } from "../company/registry";
 
 // DEPARTMENT_FOUNDATIONS has existed since Jul 15 and, until this change, exactly one caller
 // read it — the roadmap generator. Chat and run-task, the two places a founder actually
@@ -45,6 +46,33 @@ describe("department expertise reaches the prompts", () => {
     });
   });
 
+  // 9 Oct: the foundations are a mandate and a skill list — enough to name the topic, not
+  // enough to think like the department. The room's role prompts (registry.ts) carry the lens,
+  // the metrics and the characteristic failure, and until now only the room read them, so the
+  // same Finance answered a Plan question with runway arithmetic and an Ask question without.
+  describe("chat speaks with the room's head of department", () => {
+    it("carries the room's role prompt for every chat department", () => {
+      for (const key of Object.keys(DEPARTMENT_NAMES)) {
+        const p = buildSystemPrompt({ companionId: "byte", language: "en", deptKey: key });
+        const roomKey = ROOM_KEY_FOR_TEST[key];
+        expect(p).toContain(AGENT_DEFS[roomKey].role);
+      }
+    });
+
+    it("keeps an ordinary turn free of any role prompt", () => {
+      const p = buildSystemPrompt({ companionId: "byte", language: "en" });
+      expect(p).not.toContain("ROLE: Head of");
+    });
+
+    // A department that answers from expertise will fill a gap with a plausible number. The
+    // founder asked Finance because they want THEIR number, so a missing one is named, not made up.
+    it("tells the department to name what is not on record instead of inventing it", () => {
+      const p = buildSystemPrompt({ companionId: "byte", language: "en", deptKey: "fin" });
+      expect(p).toMatch(/not on record/i);
+      expect(buildSystemPrompt({ companionId: "byte", language: "en" })).not.toMatch(/not on record/i);
+    });
+  });
+
   describe("run-task prompt", () => {
     const base = {
       companionId: "nova",
@@ -75,3 +103,10 @@ describe("department expertise reaches the prompts", () => {
     });
   });
 });
+
+// Spelled out here rather than imported: if the production map drops or misroutes a key, this
+// table is what disagrees with it.
+const ROOM_KEY_FOR_TEST: Record<string, keyof typeof AGENT_DEFS> = {
+  eng: "engineering", design: "design", mkt: "marketing", sales: "sales",
+  support: "support", fin: "finance", ops: "operations", legal: "legal",
+};

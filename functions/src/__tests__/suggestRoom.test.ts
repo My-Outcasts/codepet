@@ -1,4 +1,4 @@
-import { coerceRoomOffer, resolveActions, buildChatRequest } from "../companyChatCore";
+import { coerceRoomOffer, resolveActions, buildChatRequest, buildSystemPrompt } from "../companyChatCore";
 import { doneFrame } from "../local/chatSidecar";
 
 // 9 Oct: since #247 a department in Ask is told to say "this one needs Marketing too", and the
@@ -50,5 +50,19 @@ describe("suggest_room on the wire", () => {
     expect(names({ user_message: "hi", dept_key: "fin" })).toContain("suggest_room");
     expect(names({ user_message: "hi" })).not.toContain("suggest_room");
     expect(names({ user_message: "hi", dept_key: "nope" })).not.toContain("suggest_room");
+  });
+});
+
+// 9 Oct, measured in the app: with a project folder linked (Read/Glob/Grep on), the model said
+// "Marketing and Sales both want this money" in prose and called suggest_room 0 times in 3 on
+// the founder's real request (3/3 without the folder). The role framing told it to SAY the
+// room was needed, never to OFFER it. The prompt now names the tool at that exact point.
+describe("the department is told to offer the room, not just mention it", () => {
+  it("names suggest_room where it says another department is needed", () => {
+    const p = buildSystemPrompt({ companionId: "crash", language: "en", deptKey: "fin" });
+    expect(p).toMatch(/suggest_room/);
+  });
+  it("says nothing about it on an ordinary turn", () => {
+    expect(buildSystemPrompt({ companionId: "byte", language: "en" })).not.toMatch(/suggest_room/);
   });
 });

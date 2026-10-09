@@ -144,7 +144,11 @@ function roleBlock(deptKey?: string | null): string {
   const role = agent ? AGENT_DEFS[agent]?.role : undefined;
   if (!role) return "";
   return (
-    `\nThis is how the head of that department thinks. In this chat you speak with the founder one to one, so use the lens, the metrics and the pushback; the lines about other departments tell you when to say "this one needs Marketing too", not that they are in the conversation.\n` +
+    `\nThis is how the head of that department thinks. In this chat you speak with the founder one to one, so use the lens, the metrics and the pushback; the lines about other departments tell you when another department is needed, not that they are in the conversation.\n` +
+    // Measured 9 Oct: told only to SAY another department was needed, the model said so in
+    // prose and called suggest_room 0/3 times on a real request with a folder linked. Naming
+    // the tool at this point is what turns the sentence into the founder's button.
+    `When the question pulls another department's interest against yours (the same money, the same week, price against pipeline), give your own answer AND call suggest_room naming those departments, so the founder can bring them in with one press. Saying "this needs Sales too" without calling it leaves them nothing to press.\n` +
     `${role}\n\n` +
     `Answer from the founder's company as it is on record in the context below — their numbers, their deliverables, their decisions. When a figure this answer depends on is not on record (runway, price, a conversion rate), say plainly that it is not on record, give the answer under a clearly labelled assumption if one helps, and ask the founder for the real figure. Never present an invented number as theirs. Showing your arithmetic can take a few more lines than usual; that is fine.\n`
   );

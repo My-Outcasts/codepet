@@ -22,6 +22,18 @@ describe("applyRequestedAgents", () => {
       ["finance", "sales", "marketing", "legal", "support"]);
     expect(r.agents).toEqual(["finance", "sales", "marketing", "legal", "devils_advocate"]);
   });
+  // Review, 9 Oct: the panel showed "✗ Sales — not a pricing question" under NOT IN THE ROOM
+  // while Sales sat in the room, and gave Sales no ✓ line. A forced room must read as one.
+  it("makes the routing panel agree with the forced room", () => {
+    const r = applyRequestedAgents(
+      { ...single, decision: "needs_clarification", excluded: { sales: "not a pricing question", legal: "no contract" },
+        reason_per_agent: { finance: "owns price" }, missing_info: ["current conversion rate"] },
+      ["finance", "sales"]);
+    expect(r.excluded).toEqual({ legal: "no contract" });
+    expect(r.reason_per_agent.finance).toBe("owns price");
+    expect(r.reason_per_agent.sales).toMatch(/founder/i);
+    expect(r.missing_info).toEqual([]);
+  });
   it("leaves the routing alone with fewer than two routable departments", () => {
     expect(applyRequestedAgents(single, ["finance"])).toBe(single);
     expect(applyRequestedAgents(single, ["chief_of_staff", "devils_advocate", "product", "finance"])).toBe(single);

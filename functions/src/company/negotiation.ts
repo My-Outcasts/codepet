@@ -1,4 +1,5 @@
 import { AGENT_DEFS, composeAgentSystem } from "./registry";
+import { stanceWords } from "./conflicts";
 import { AgentCaller, POSITION_EFFORT } from "./router";
 import {
   AgentId,
@@ -121,7 +122,7 @@ function renderOpposing(
       const blocker = p.hard_blocker
         ? `\n   HARD BLOCKER: ${p.hard_blocker}`
         : "\n   No hard blocker.";
-      return `${a} (stance: ${p.stance}, confidence ${p.confidence}/5):\n   ${p.position}\n   Reasoning: ${p.reasoning}${blocker}`;
+      return `${a} (stance: ${stanceWords(p.stance)}, confidence ${p.confidence}/5):\n   ${p.position}\n   Reasoning: ${p.reasoning}${blocker}`;
     })
     .join("\n\n");
 }

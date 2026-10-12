@@ -1,4 +1,5 @@
 import { AGENT_DEFS, composeAgentSystem } from "./registry";
+import { stanceWords } from "./conflicts";
 import { AgentCaller } from "./router";
 import {
   AgentId,
@@ -159,7 +160,7 @@ function renderPositions(positions: Partial<Record<AgentId, AgentPosition>>): st
       const blocker = position.hard_blocker
         ? `\n   HARD BLOCKER: ${position.hard_blocker}`
         : "";
-      return `${agent} (stance: ${position.stance}, confidence ${position.confidence}/5):\n   ${position.position}\n   Reasoning: ${position.reasoning}\n   Cost to their own department: ${position.cost_to_my_dept}${blocker}`;
+      return `${agent} (stance: ${stanceWords(position.stance)}, confidence ${position.confidence}/5):\n   ${position.position}\n   Reasoning: ${position.reasoning}\n   Cost to their own department: ${position.cost_to_my_dept}${blocker}`;
     })
     .join("\n\n");
 }

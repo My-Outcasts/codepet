@@ -240,6 +240,28 @@ describe("runNegotiation", () => {
     expect(financePrompt).not.toContain("FINANCE_OWN_WORDS");
   });
 
+  test("shows the opposing stance in words, never the internal code", async () => {
+    // Negotiation turns are shown to the founder, and a model echoes the labels it is given.
+    let productPrompt = "";
+    await runNegotiation({
+      founder,
+      rawRequest,
+      realQuestion,
+      positions: {
+        product: pos("proceed"),
+        finance: pos("do_not_proceed", "blocker text")
+      },
+      conflicts: blockerConflict,
+      call: async (args) => {
+        if (args.agent === "product") productPrompt = args.userMessage;
+        return { input: turnInput({ resolved: true }), usage: zeroUsage };
+      }
+    });
+    // The fixture's own position text says "do_not_proceed", so check the label, not the page.
+    expect(productPrompt).toContain("(stance: do not proceed,");
+    expect(productPrompt).not.toContain("(stance: do_not_proceed");
+  });
+
   test("surfaces the opposing hard blocker verbatim", async () => {
     let productPrompt = "";
     await runNegotiation({

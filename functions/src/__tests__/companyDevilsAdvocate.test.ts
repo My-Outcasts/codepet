@@ -210,6 +210,26 @@ describe("runDevilsAdvocate", () => {
     expect(prompt).toContain("FINANCE_SAYS_THIS");
   });
 
+  test("is shown stances in words, never the internal code", async () => {
+    // Its verdict reaches the founder, and a model echoes the labels it is given.
+    let prompt = "";
+    await runDevilsAdvocate({
+      founder,
+      rawRequest: "x",
+      realQuestion: "q",
+      positions: {
+        product: pos({ stance: "proceed_with_conditions" }),
+        finance: pos({ stance: "do_not_proceed" })
+      },
+      call: async (args) => {
+        prompt = args.userMessage;
+        return { input: verdictInput(), usage: zeroUsage };
+      }
+    });
+    expect(prompt).not.toMatch(/do_not_proceed|proceed_with_conditions/);
+    expect(prompt).toContain("do not proceed");
+  });
+
   test("throws with a descriptive message on an unusable verdict", async () => {
     await expect(
       runDevilsAdvocate({

@@ -287,6 +287,27 @@ describe("runSynthesis", () => {
     expect(prompt).toContain("BLOCKER_VERBATIM");
   });
 
+  test("gives the synthesiser stances in words, never the internal code", async () => {
+    // the_real_disagreement is printed on the room card verbatim, and the model copies what it is
+    // shown: fed "stance: do_not_proceed", it wrote "Finance, Marketing and Sales independently
+    // reached do_not_proceed" into WHERE THEY AGREE (build 13, 12 Oct).
+    let prompt = "";
+    await runSynthesis({
+      ...baseArgs,
+      positions: {
+        product: pos({ stance: "proceed_with_conditions" }),
+        finance: pos({ stance: "do_not_proceed" })
+      },
+      call: async (args) => {
+        prompt = args.userMessage;
+        return { input: briefInput(), usage: zeroUsage };
+      }
+    });
+    expect(prompt).not.toMatch(/do_not_proceed|proceed_with_conditions/);
+    expect(prompt).toContain("do not proceed");
+    expect(prompt).toContain("proceed with conditions");
+  });
+
   test("tells the synthesiser when the negotiation did not resolve", async () => {
     let prompt = "";
     await runSynthesis({

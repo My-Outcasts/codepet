@@ -24,8 +24,13 @@ export function deptName(id: string): string {
     .join(" ");
 }
 
-/** "proceed_with_conditions" → "proceed with conditions". */
-function stanceWords(stance: string): string {
+/**
+ * "proceed_with_conditions" → "proceed with conditions".
+ *
+ * Every prompt that shows a model a stance goes through this too, not just the conflict reasons:
+ * a model echoes the labels it is given, and the synthesis prints them on the room card verbatim.
+ */
+export function stanceWords(stance: string): string {
   return stance.replace(/_/g, " ");
 }
 

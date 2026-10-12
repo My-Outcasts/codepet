@@ -2458,26 +2458,52 @@ struct CopilotBubble: View {
         }
     }
 
-    /// A transient "Noted" chip per remembered fact — memory is already merged +
-    /// persisted (`CompanyStore.handleRemember`) by the time this renders, so
-    /// there is no tap/approval affordance here, just an acknowledgement.
+    /// The receipt for remembered facts — memory is already merged + persisted
+    /// (`CompanyStore.handleRemember`) by the time this renders, so there is no approval
+    /// affordance here, just an acknowledgement. See `NotedSummary` for why it is one line.
     private func notedInline(_ facts: [RememberedFact]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(facts, id: \.topic) { fact in
-                // CLAMPED, and a capsule no longer: `statement` is whatever the model chose to
-                // remember, and when the Virtual Company files its brief that is several hundred
-                // words. Unclamped inside a Capsule it rendered as a wall of grey text taller
-                // than the answer it summarised (seen in the app, Aug 5). An acknowledgement is
-                // one line; the fact itself lives in Settings → Memory.
-                Text("📌 " + (lang == .vi ? "Đã ghi nhớ" : "Noted") + " · \(fact.topic) — \(fact.statement)")
-                    .font(.pixelSystem(size: 10))
-                    .foregroundColor(CodepetTheme.mutedText)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(CodepetTheme.surface))
+        NotedRow(facts: facts)
+    }
+
+    /// One muted line; several facts fold behind it and open on click. No pill and no pin: the
+    /// three-pill version stood taller than the answer above it (founder, 12 Oct).
+    private struct NotedRow: View {
+        let facts: [RememberedFact]
+        @Environment(\.uiLanguage) private var lang
+        @State private var open = false
+
+        var body: some View {
+            if let line = NotedSummary.line(facts, lang: lang) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if NotedSummary.folds(facts) {
+                        Button { withAnimation(.easeInOut(duration: 0.16)) { open.toggle() } } label: {
+                            HStack(spacing: 5) {
+                                Text(line).lineLimit(1)
+                                Image(systemName: open ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 8, weight: .bold))
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(lang == .vi ? "Xem các điều đã ghi nhớ" : "Show what was noted")
+                        if open {
+                            // CLAMPED: `statement` is whatever the model chose to remember, and a
+                            // Virtual Company brief makes it several hundred words (Aug 5). The
+                            // fact itself lives in Settings → Memory.
+                            ForEach(facts, id: \.topic) { fact in
+                                Text("\(fact.topic) — \(fact.statement)")
+                                    .lineLimit(2).truncationMode(.tail)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.leading, 10)
+                            }
+                        }
+                    } else {
+                        Text(line).lineLimit(2).truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .font(CodepetTheme.inter(12))
+                .foregroundColor(CodepetTheme.mutedText)
             }
         }
     }
